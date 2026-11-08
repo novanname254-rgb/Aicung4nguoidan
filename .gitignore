@@ -1,0 +1,5 @@
+# Bỏ qua tệp hệ thống macOS
+.DS_Store
+
+# Bỏ qua thư mục thư viện Node.js
+node_modules/

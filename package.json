@@ -1,0 +1,18 @@
+{
+  "name": "plan-master-ai",
+  "version": "1.0.0",
+  "description": "Ứng dụng lập kế hoạch thông minh với giao diện hiện đại và trợ lý AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "planner",
+    "ai",
+    "task-management",
+    "productivity"
+  ],
+  "author": "",
+  "license": "MIT"
+}

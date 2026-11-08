@@ -1,0 +1,181 @@
+[
+  {
+    "id": "plan_1",
+    "title": "Hoàn thiện báo cáo phân tích chiến lược Q4",
+    "description": "Tổng hợp số liệu doanh thu, đánh giá KPI các phòng ban và đề xuất định hướng phát triển cho quý tiếp theo.",
+    "category": "Công việc",
+    "priority": "high",
+    "status": "in_progress",
+    "startDate": "2026-11-05",
+    "dueDate": "2026-11-12",
+    "tags": [
+      "Báo cáo",
+      "Chiến lược",
+      "Q4"
+    ],
+    "subtasks": [
+      {
+        "id": "sub_1_1",
+        "title": "Thu thập số liệu từ phòng tài chính và marketing",
+        "completed": true
+      },
+      {
+        "id": "sub_1_2",
+        "title": "Vẽ biểu đồ so sánh tăng trưởng doanh thu",
+        "completed": true
+      },
+      {
+        "id": "sub_1_3",
+        "title": "Viết phần kết luận và khuyến nghị hành động",
+        "completed": false
+      },
+      {
+        "id": "sub_1_4",
+        "title": "Gửi bản nháp cho trưởng bộ phận xem trước",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-11-05T08:00:00.000Z",
+    "updatedAt": "2026-11-07T14:30:00.000Z"
+  },
+  {
+    "id": "plan_2",
+    "title": "Luyện nghe và nói Tiếng Anh 30 phút mỗi ngày",
+    "description": "Duy trì thói quen luyện nghe qua podcast BBC 6 Minute English và ghi âm bài nói Shadowing để cải thiện ngữ điệu.",
+    "category": "Học tập",
+    "priority": "medium",
+    "status": "in_progress",
+    "startDate": "2026-11-01",
+    "dueDate": "2026-11-30",
+    "tags": [
+      "Tiếng Anh",
+      "Tự học",
+      "Kỹ năng"
+    ],
+    "subtasks": [
+      {
+        "id": "sub_2_1",
+        "title": "Nghe 1 tập podcast BBC vào mỗi buổi sáng",
+        "completed": true
+      },
+      {
+        "id": "sub_2_2",
+        "title": "Học 10 từ vựng chuyên ngành qua Anki",
+        "completed": true
+      },
+      {
+        "id": "sub_2_3",
+        "title": "Ghi âm nói theo phương pháp Shadowing 15 phút",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-11-01T07:00:00.000Z",
+    "updatedAt": "2026-11-06T10:15:00.000Z"
+  },
+  {
+    "id": "plan_3",
+    "title": "Kế hoạch rèn luyện thể lực: Chạy bộ 5km",
+    "description": "Nâng cao sức bền tim mạch, duy trì lịch chạy 3 buổi/tuần (Thứ 3, 5, 7) vào khung giờ 6h00 - 6h45 sáng.",
+    "category": "Sức khỏe",
+    "priority": "high",
+    "status": "todo",
+    "startDate": "2026-11-08",
+    "dueDate": "2026-11-28",
+    "tags": [
+      "Thể thao",
+      "Sức khỏe",
+      "Chạy bộ"
+    ],
+    "subtasks": [
+      {
+        "id": "sub_3_1",
+        "title": "Khởi động kỹ khớp gối và cổ chân 10 phút",
+        "completed": false
+      },
+      {
+        "id": "sub_3_2",
+        "title": "Chạy xen kẽ đi bộ nhanh đạt cự ly 3km tuần đầu",
+        "completed": false
+      },
+      {
+        "id": "sub_3_3",
+        "title": "Nâng cự ly lên 5km liên tục với pace 6:30",
+        "completed": false
+      },
+      {
+        "id": "sub_3_4",
+        "title": "Giãn cơ và bổ sung 500ml nước điện giải",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-11-07T16:00:00.000Z",
+    "updatedAt": "2026-11-07T16:00:00.000Z"
+  },
+  {
+    "id": "plan_4",
+    "title": "Đọc và tổng kết cuốn sách 'Atomic Habits'",
+    "description": "Đúc kết các nguyên lý xây dựng thói quen tốt và loại bỏ thói quen xấu vào ứng dụng ghi chú cá nhân.",
+    "category": "Cá nhân",
+    "priority": "low",
+    "status": "completed",
+    "startDate": "2026-10-20",
+    "dueDate": "2026-11-04",
+    "tags": [
+      "Đọc sách",
+      "Phát triển bản thân"
+    ],
+    "subtasks": [
+      {
+        "id": "sub_4_1",
+        "title": "Đọc phần 1 & 2: Định luật tạo sự rõ ràng và hấp dẫn",
+        "completed": true
+      },
+      {
+        "id": "sub_4_2",
+        "title": "Đọc phần 3 & 4: Định luật làm cho dễ dàng và thỏa mãn",
+        "completed": true
+      },
+      {
+        "id": "sub_4_3",
+        "title": "Tạo mindmap tóm tắt 4 định luật cốt lõi",
+        "completed": true
+      }
+    ],
+    "createdAt": "2026-10-20T09:00:00.000Z",
+    "updatedAt": "2026-11-08T03:29:36.539Z"
+  },
+  {
+    "id": "plan_5",
+    "title": "Lập bảng cân đối chi tiêu & Quỹ dự phòng cá nhân",
+    "description": "Rà soát lại toàn bộ nguồn thu nhập, cố định các khoản chi thiết yếu và chuyển 20% vào tài khoản tích lũy khẩn cấp.",
+    "category": "Tài chính",
+    "priority": "urgent",
+    "status": "todo",
+    "startDate": "2026-11-08",
+    "dueDate": "2026-11-10",
+    "tags": [
+      "Tài chính",
+      "Tiết kiệm",
+      "Quản lý chi tiêu"
+    ],
+    "subtasks": [
+      {
+        "id": "sub_5_1",
+        "title": "Thống kê sao kê chi tiêu tháng trước",
+        "completed": false
+      },
+      {
+        "id": "sub_5_2",
+        "title": "Phân bổ ngân sách theo quy tắc 50/30/20",
+        "completed": false
+      },
+      {
+        "id": "sub_5_3",
+        "title": "Thiết lập chuyển khoản tiết kiệm tự động",
+        "completed": false
+      }
+    ],
+    "createdAt": "2026-11-08T07:30:00.000Z",
+    "updatedAt": "2026-11-08T07:30:00.000Z"
+  }
+]

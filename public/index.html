@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>PlanMaster AI - Lập Kế Hoạch Thông Minh, Khảo Sát Tâm Lý & Nhắc Lịch</title>
+  <meta name="description" content="Nền tảng Progressive Web App lập kế hoạch cá nhân, đo lường sức khỏe tâm lý và nhận thông báo lịch trình tự động." />
+
+  <!-- PWA Meta Tags & Icons -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#6366f1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PlanMaster" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+  <link rel="icon" type="image/svg+xml" href="/icons/icon-192.svg" />
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+      <div style="display: flex; align-items: center;">
+        <a href="#" class="brand">
+          <div class="brand-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <div class="brand-text">PlanMaster <span>AI</span></div>
+        </a>
+
+        <!-- Main Navigation Segmented Switcher -->
+        <nav class="nav-tab-switcher" role="tablist">
+          <button class="nav-tab-btn active" id="tab-btn-plans" data-tab="plans" role="tab" aria-selected="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>
+            <span>Kế Hoạch</span>
+          </button>
+          <button class="nav-tab-btn" id="tab-btn-mental" data-tab="mental" role="tab" aria-selected="false">
+            <span>🧘</span>
+            <span>Khảo Sát Tâm Lý</span>
+          </button>
+          <button class="nav-tab-btn" id="tab-btn-tm" data-tab="tm" role="tab" aria-selected="false">
+            <span>📷</span>
+            <span>AI Camera (Teachable Machine)</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="nav-actions">
+        <!-- Notification Center Bell -->
+        <div class="notification-wrapper" id="notification-wrapper">
+          <button class="btn-icon btn-notification" id="btn-notification-bell" title="Thông báo lịch trình cần làm">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="pulse-badge" id="notification-badge" style="display: none;">0</span>
+          </button>
+
+          <div class="notification-dropdown" id="notification-dropdown">
+            <div class="notif-dropdown-header">
+              <span>🔔 Thông Báo Lịch Trình</span>
+              <span style="font-size: 0.72rem; color: var(--text-muted);">Cần hoàn thành</span>
+            </div>
+            <div class="notification-list" id="notification-list"></div>
+          </div>
+        </div>
+
+        <!-- PWA Install Button (Appears if installable) -->
+        <button class="btn btn-secondary" id="btn-pwa-install" style="display: none;" title="Cài đặt ứng dụng">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          <span>Cài Đặt App</span>
+        </button>
+
+        <!-- AI Assistant Toggle Button -->
+        <button class="btn btn-ai-toggle" id="btn-toggle-ai" title="Mở Trợ lý AI Lập Kế Hoạch">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+          </svg>
+          <span>Trợ Lý AI</span>
+        </button>
+
+        <!-- Backup Export Button -->
+        <button class="btn btn-secondary" id="btn-export-plans" title="Sao lưu dữ liệu JSON">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Sao lưu</span>
+        </button>
+
+        <!-- Theme Switcher Button -->
+        <button class="btn-icon" id="btn-toggle-theme" title="Đổi giao diện Sáng/Tối">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+
+        <!-- Add Plan Button -->
+        <button class="btn btn-primary" id="btn-new-plan">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>Thêm Kế Hoạch</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="main-wrapper">
+      <main class="content-area">
+        <!-- Urgent Schedule Alert Banner -->
+        <div id="urgent-schedule-banner" class="urgent-banner banner-warning" style="display: none;"></div>
+
+        <!-- TAB 1: PLANS MANAGEMENT -->
+        <div id="plans-tab-content">
+          <!-- Dashboard Statistics -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-info">
+                <div class="stat-label">Tổng Kế Hoạch</div>
+                <div class="stat-value" id="stat-total">0</div>
+              </div>
+              <div class="stat-badge" style="color: var(--primary); background: var(--primary-light);">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-info">
+                <div class="stat-label">Đang Thực Hiện</div>
+                <div class="stat-value" id="stat-in-progress">0</div>
+              </div>
+              <div class="stat-badge" style="color: var(--status-in_progress); background: rgba(59, 130, 246, 0.15);">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-info">
+                <div class="stat-label">Đã Hoàn Thành</div>
+                <div class="stat-value" id="stat-completed">0</div>
+              </div>
+              <div class="stat-badge" style="color: var(--status-completed); background: rgba(16, 185, 129, 0.15);">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-info">
+                <div class="stat-label">Tiến Độ Chung</div>
+                <div class="stat-value" id="stat-rate">0%</div>
+              </div>
+              <div class="stat-badge" style="color: #ec4899; background: rgba(236, 72, 153, 0.15);">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Controls Toolbar -->
+          <div class="controls-bar">
+            <div class="search-filter-group">
+              <div class="search-box">
+                <span class="search-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </span>
+                <input type="text" id="search-input" class="search-input" placeholder="Tìm kiếm kế hoạch, ghi chú, nhãn..." />
+              </div>
+
+              <select id="filter-category" class="select-filter">
+                <option value="all">📂 Tất cả danh mục</option>
+                <option value="Công việc">💼 Công việc</option>
+                <option value="Học tập">📚 Học tập</option>
+                <option value="Sức khỏe">💪 Sức khỏe</option>
+                <option value="Tài chính">💰 Tài chính</option>
+                <option value="Cá nhân">🌱 Cá nhân</option>
+              </select>
+
+              <select id="filter-priority" class="select-filter">
+                <option value="all">🎯 Mức ưu tiên</option>
+                <option value="urgent">🔥 Khẩn cấp</option>
+                <option value="high">⚡ Cao</option>
+                <option value="medium">🔹 Trung bình</option>
+                <option value="low">☕ Thấp</option>
+              </select>
+            </div>
+
+            <div class="view-actions-group">
+              <div class="view-switcher">
+                <button class="view-btn active" id="view-kanban-btn" title="Chế độ Bảng Kanban">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>
+                  <span>Bảng</span>
+                </button>
+                <button class="view-btn" id="view-list-btn" title="Chế độ Danh sách">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                  <span>Danh sách</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Kanban Board View -->
+          <div id="kanban-view" class="kanban-board">
+            <!-- Column 1: Todo -->
+            <div class="kanban-column">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="status-dot todo"></span>
+                  <span>Cần làm</span>
+                </div>
+                <span class="column-count" id="count-todo">0</span>
+              </div>
+              <div class="column-body" id="column-todo-items"></div>
+            </div>
+
+            <!-- Column 2: In Progress -->
+            <div class="kanban-column">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="status-dot in_progress"></span>
+                  <span>Đang thực hiện</span>
+                </div>
+                <span class="column-count" id="count-in_progress">0</span>
+              </div>
+              <div class="column-body" id="column-in_progress-items"></div>
+            </div>
+
+            <!-- Column 3: Completed -->
+            <div class="kanban-column">
+              <div class="column-header">
+                <div class="column-title-group">
+                  <span class="status-dot completed"></span>
+                  <span>Hoàn thành</span>
+                </div>
+                <span class="column-count" id="count-completed">0</span>
+              </div>
+              <div class="column-body" id="column-completed-items"></div>
+            </div>
+          </div>
+
+          <!-- List View (Hidden by default) -->
+          <div id="list-view" class="list-view-container" style="display: none;"></div>
+        </div>
+
+        <!-- TAB 2: MENTAL HEALTH SURVEY & WELLBEING (Hidden by default) -->
+        <div id="mental-health-section" style="display: none;"></div>
+
+        <!-- TAB 3: TEACHABLE MACHINE AI CAMERA (Hidden by default) -->
+        <div id="teachable-machine-section" style="display: none;"></div>
+      </main>
+
+      <!-- AI Assistant Drawer -->
+      <aside id="ai-drawer" class="ai-drawer">
+        <div class="ai-header">
+          <div class="ai-header-title">
+            <div class="brand-icon" style="width: 28px; height: 28px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+            </div>
+            <span>PlanBot AI</span>
+            <span class="ai-header-badge">Trực tuyến</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.35rem;">
+            <button class="card-action-btn" id="btn-ai-settings" title="Cài đặt mô hình AI">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </button>
+            <button class="card-action-btn" id="btn-close-ai" title="Đóng cửa sổ chat">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Messages Container -->
+        <div class="ai-messages" id="ai-messages"></div>
+
+        <!-- Quick Prompts Chips -->
+        <div class="ai-quick-prompts" id="ai-quick-prompts"></div>
+
+        <!-- Chat Input Form -->
+        <div class="ai-input-area">
+          <div class="chat-input-wrapper">
+            <input type="text" id="ai-input" class="chat-input" placeholder="Hỏi AI hoặc yêu cầu lập kế hoạch..." autocomplete="off" />
+            <button class="btn-send" id="ai-send-btn" title="Gửi tin nhắn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Modal: Add / Edit Plan -->
+    <div class="modal-overlay" id="modal-plan-form">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 class="modal-title" id="modal-plan-title">Tạo Kế Hoạch Mới</h3>
+          <button class="card-action-btn" id="btn-close-plan-modal">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <form id="plan-form">
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label" for="plan-input-title">Tiêu đề kế hoạch *</label>
+              <input type="text" id="plan-input-title" class="form-control" placeholder="Ví dụ: Hoàn thành đề cương nghiên cứu khoa học" required />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="plan-input-category">Danh mục</label>
+                <select id="plan-input-category" class="form-control">
+                  <option value="Công việc">💼 Công việc</option>
+                  <option value="Học tập">📚 Học tập</option>
+                  <option value="Sức khỏe">💪 Sức khỏe</option>
+                  <option value="Tài chính">💰 Tài chính</option>
+                  <option value="Cá nhân">🌱 Cá nhân</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="plan-input-priority">Mức ưu tiên</label>
+                <select id="plan-input-priority" class="form-control">
+                  <option value="urgent">🔥 Khẩn cấp</option>
+                  <option value="high">⚡ Cao</option>
+                  <option value="medium" selected>🔹 Trung bình</option>
+                  <option value="low">☕ Thấp</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="plan-input-start">Ngày bắt đầu</label>
+                <input type="date" id="plan-input-start" class="form-control" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="plan-input-due">Hạn chót (Deadline)</label>
+                <input type="date" id="plan-input-due" class="form-control" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="plan-input-status">Trạng thái hiện tại</label>
+              <select id="plan-input-status" class="form-control">
+                <option value="todo">📌 Cần làm (Chưa bắt đầu)</option>
+                <option value="in_progress">⚡ Đang thực hiện</option>
+                <option value="completed">✅ Đã hoàn thành</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="plan-input-desc">Mô tả chi tiết / Ghi chú</label>
+              <textarea id="plan-input-desc" class="form-control" placeholder="Chi tiết mục tiêu, lưu ý, người phối hợp..."></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Các bước thực hiện (Subtasks / Checklist)</label>
+              <div id="subtasks-builder-list" class="subtasks-builder"></div>
+              <button type="button" class="btn-add-subtask" id="btn-add-subtask-modal">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Thêm bước con</span>
+              </button>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="plan-input-tags">Nhãn (Tags - Phân cách bằng dấu phẩy)</label>
+              <input type="text" id="plan-input-tags" class="form-control" placeholder="Ví dụ: Q4, Báo cáo, Khẩn cấp" />
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-plan">Huỷ</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-plan">Lưu Kế Hoạch</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal: Delete Confirmation -->
+    <div class="modal-overlay" id="modal-delete-confirm">
+      <div class="modal-content" style="max-width: 440px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="color: #ef4444; display: flex; align-items: center; gap: 0.5rem;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Xác Nhận Xoá
+          </h3>
+          <button class="card-action-btn" id="btn-close-delete-modal">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p>Bạn có chắc chắn muốn xoá kế hoạch này không?</p>
+          <p style="font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;" id="delete-plan-title">"..."</p>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Bạn vẫn có thể nhấn nút Hoàn tác ngay sau khi xoá nếu lỡ bấm nhầm.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-delete">Giữ lại</button>
+          <button type="button" class="btn btn-danger" id="btn-confirm-delete">Xoá Vĩnh Viễn</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: AI Settings -->
+    <div class="modal-overlay" id="modal-ai-settings">
+      <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+          <h3 class="modal-title">⚙️ Cài Đặt Trợ Lý AI</h3>
+          <button class="card-action-btn" id="btn-close-ai-settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="setting-ai-provider">Mô hình AI sử dụng</label>
+            <select id="setting-ai-provider" class="form-control">
+              <option value="builtin">🤖 Bộ não AI Tích Hợp (Mặc định - Chạy mượt tức thì)</option>
+              <option value="gemini">✨ Google Gemini 2.5 Flash API (Cần API Key)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="setting-gemini-key">Google Gemini API Key (Không bắt buộc)</label>
+            <input type="password" id="setting-gemini-key" class="form-control" placeholder="Nhập mã AIzaSy... nếu muốn dùng Gemini trực tiếp" />
+            <small style="color: var(--text-muted); font-size: 0.775rem; margin-top: 0.25rem;">
+              * Mặc định hệ thống đã có AI thông minh tích hợp sẵn không cần key. Nếu muốn kết nối với model lớn nhất của Google, bạn có thể lấy key miễn phí tại <a href="https://aistudio.google.com" target="_blank" style="color: var(--primary);">Google AI Studio</a>.
+            </small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" id="btn-save-ai-settings">Lưu Cấu Hình</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <!-- TensorFlow.js & Teachable Machine Library -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+  <!-- Application Modules -->
+  <script src="/js/icons.js"></script>
+  <script src="/js/notifications.js"></script>
+  <script src="/js/mental-health.js"></script>
+  <script src="/js/teachable-machine.js"></script>
+  <script src="/js/ai-assistant.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
