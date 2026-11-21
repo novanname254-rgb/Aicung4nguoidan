@@ -1,13 +1,14 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const url = require('url');
-const crypto = require('crypto');
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const url = require('node:url');
+const crypto = require('node:crypto');
+
+const { getDb, hashPassword, verifyPassword } = require('./server/db');
+const { ensureDemoUser, createSession, getUserFromSession, deleteSession } = require('./server/auth');
+const { generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
 
 const PORT = process.env.PORT || 3000;
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'plans.json');
-const MENTAL_HEALTH_FILE = path.join(DATA_DIR, 'mental-health.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // MIME types for static files
@@ -21,75 +22,23 @@ const MIME_TYPES = {
   '.jpeg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2'
+  '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json'
 };
 
-// Ensure data folder and files exist
-function initDataFile() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, '[]', 'utf8');
-  }
-  if (!fs.existsSync(MENTAL_HEALTH_FILE)) {
-    fs.writeFileSync(MENTAL_HEALTH_FILE, '[]', 'utf8');
-  }
-}
-
-function readMentalHealth() {
-  try {
-    initDataFile();
-    const data = fs.readFileSync(MENTAL_HEALTH_FILE, 'utf8');
-    return JSON.parse(data || '[]');
-  } catch (err) {
-    return [];
-  }
-}
-
-function writeMentalHealth(records) {
-  try {
-    initDataFile();
-    fs.writeFileSync(MENTAL_HEALTH_FILE, JSON.stringify(records, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    return false;
-  }
-}
-
-function readPlans() {
-  try {
-    initDataFile();
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data || '[]');
-  } catch (err) {
-    console.error('Lỗi khi đọc file plans.json:', err);
-    return [];
-  }
-}
-
-function writePlans(plans) {
-  try {
-    initDataFile();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(plans, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    console.error('Lỗi khi ghi file plans.json:', err);
-    return false;
-  }
-}
-
-// Helpers for request & response
-function sendJSON(res, statusCode, data) {
+// Response helper
+function sendJSON(res, statusCode, data, headers = {}) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    ...headers
   });
   res.end(JSON.stringify(data));
 }
 
+// Parse request body
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -111,722 +60,1013 @@ function parseBody(req) {
   });
 }
 
-// Built-in Intelligent Planner AI Engine
-function generateAIPlanResponse(userMessage, plansContext = []) {
-  const msg = (userMessage || '').toLowerCase();
-  const now = new Date();
-  
-  // Format date helper: YYYY-MM-DD
-  const formatDate = (daysAhead) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() + daysAhead);
-    return d.toISOString().split('T')[0];
-  };
-
-  let category = 'Công việc';
-  let title = 'Kế hoạch phát triển mục tiêu mới';
-  let advice = '';
-  let suggestedTasks = [];
-
-  // 0. Sức khỏe tâm lý / Stress / Phục hồi năng lượng / Điều chỉnh lịch
-  if (msg.includes('tâm lý') || msg.includes('stress') || msg.includes('căng thẳng') || msg.includes('kiệt sức') || msg.includes('mệt mỏi') || msg.includes('tinh thần') || msg.includes('áp lực')) {
-    category = 'Sức khỏe';
-    title = 'Kế hoạch phục hồi năng lượng & Cân bằng tâm lý';
-    advice = `🌿 **Lời khuyên cân bằng tâm trí & giảm tải áp lực:**
-1. **Ưu tiên phục hồi (Energy Audit):** Khi tinh thần đang mệt mỏi, việc cố ép bản thân làm việc nặng chỉ làm tăng áp lực. Hãy tạm gác các đầu việc không khẩn cấp.
-2. **Kỹ thuật xả stress tức thì (Grounding & Breath):** Thực hành nhịp thở 4-7-8 (Hít vào 4s, giữ 7s, thở ra 8s) để kích hoạt hệ thần kinh phó giao cảm giúp nhịp tim dịu lại.
-3. **Phân tách ranh giới rõ ràng:** Tắt thông báo sau 20h00, dành ít nhất 20-30 phút thư giãn không dùng màn hình điện thoại.
-
-Dưới đây là các đầu việc phục hồi năng lượng nhẹ nhàng tôi đã chuẩn bị để giúp bạn lấy lại sự cân bằng:`;
-
-    suggestedTasks = [
-      {
-        title: 'Nghỉ ngơi chủ động & Kỹ thuật thở 4-7-8 (15 phút)',
-        description: 'Thực hiện 3 hiệp thở 4-7-8 vào buổi trưa hoặc sau giờ làm việc căng thẳng để giải tỏa áp lực thần kinh.',
-        category: 'Sức khỏe',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(1),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Tìm góc yên tĩnh, ngồi thẳng lưng thư giãn vai', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Hít vào 4 giây - Giữ 7 giây - Thở ra chậm 8 giây', completed: false }
-        ],
-        tags: ['Tâm lý', 'Thư giãn', 'Hồi phục']
-      },
-      {
-        title: 'Đi dạo ngoài trời không thiết bị điện tử 20 phút',
-        description: 'Vận động nhẹ nhàng dưới ánh sáng tự nhiên giúp tăng tiết Serotonin và giảm nồng độ hormone Cortisol.',
-        category: 'Sức khỏe',
-        priority: 'medium',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(2),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Bật chế độ không làm phiền', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Uống 1 cốc nước ấm sau khi đi dạo về', completed: false }
-        ],
-        tags: ['Đi dạo', 'Năng lượng']
-      },
-      {
-        title: 'Rà soát và dời hạn các việc chưa khẩn cấp',
-        description: 'Giảm bớt gánh nặng tâm lý bằng cách chuyển các đầu việc độ ưu tiên Thấp sang tuần sau.',
-        category: 'Công việc',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(1),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Chọn lọc tối đa 2 việc quan trọng nhất cho ngày mai', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Ghi nhận bản thân đã nỗ lực hết mình', completed: false }
-        ],
-        tags: ['Tối ưu', 'Giảm tải']
-      }
-    ];
+// Authentication middleware helper
+function getAuthUser(req) {
+  const authHeader = req.headers['authorization'] || '';
+  let token = '';
+  if (authHeader.startsWith('Bearer ')) {
+    token = authHeader.substring(7).trim();
+  } else if (req.headers['cookie']) {
+    const match = req.headers['cookie'].match(/lifecare_session=([^;]+)/);
+    if (match) token = match[1];
   }
-  // 1. Ngoại ngữ / IELTS / Tiếng Anh
-  else if (msg.includes('ielts') || msg.includes('tiếng anh') || msg.includes('ngoại ngữ') || msg.includes('english') || msg.includes('toeic')) {
-    category = 'Học tập';
-    title = 'Lộ trình bứt phá mục tiêu Tiếng Anh';
-    advice = `🎯 **Chiến lược học tập hiệu quả:**
-1. **Chia nhỏ thời gian (Time-blocking):** Dành cố định 45-60 phút vào khung giờ não bộ tỉnh táo nhất (sáng sớm hoặc tối).
-2. **Phương pháp Input trước, Output sau:** Tập trung củng cố 3000 từ vựng cốt lõi và luyện nghe Shadowing trước khi luyện viết/nói.
-3. **Theo dõi tiến độ định kỳ:** Thi thử mini-test mỗi cuối tuần để đo lường tiến bộ.
-
-Dưới đây là các đầu việc cụ thể tôi đã lập sẵn cho bạn. Bạn có thể nhấn **"Thêm vào kế hoạch"** để đưa ngay vào bảng quản lý!`;
-
-    suggestedTasks = [
-      {
-        title: 'Xây dựng vốn từ vựng học thuật (20 từ/ngày)',
-        description: 'Sử dụng phương pháp Spaced Repetition (Anki/Flashcards) học từ vựng theo chủ đề quen thuộc.',
-        category: 'Học tập',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(7),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Tải bộ thẻ từ vựng Oxford 3000 / Academic', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Học 20 từ mới và ôn lại 40 từ cũ mỗi ngày', completed: false }
-        ],
-        tags: ['Tiếng Anh', 'Từ vựng', 'Anki']
-      },
-      {
-        title: 'Luyện nghe & Nhại giọng (Shadowing) 30 phút/ngày',
-        description: 'Luyện tai nghe quen với ngữ điệu người bản xứ qua BBC 6 Minute English hoặc TED Talks.',
-        category: 'Học tập',
-        priority: 'medium',
-        status: 'todo',
-        startDate: formatDate(1),
-        dueDate: formatDate(14),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Nghe lần 1 không phụ đề để nắm ý chính', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Vừa nghe vừa đọc to theo transcript (Shadowing)', completed: false }
-        ],
-        tags: ['Tiếng Anh', 'Listening', 'Speaking']
-      },
-      {
-        title: 'Luyện đề và tự chấm điểm hàng tuần',
-        description: 'Làm 1 bài test hoàn chỉnh kỹ năng Đọc và Nghe vào sáng Chủ nhật để đánh giá band điểm.',
-        category: 'Học tập',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(6),
-        dueDate: formatDate(21),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Bấm giờ chuẩn 60 phút Reading và 40 phút Listening', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Ghi chú sổ tay lỗi sai và từ vựng bẫy', completed: false }
-        ],
-        tags: ['Thi thử', 'Đánh giá']
-      }
-    ];
-  }
-  // 2. Sức khỏe / Giảm cân / Tập gym / Chạy bộ
-  else if (msg.includes('giảm cân') || msg.includes('gym') || msg.includes('chạy bộ') || msg.includes('tập luyện') || msg.includes('sức khỏe') || msg.includes('thể dục') || msg.includes('ăn kiêng')) {
-    category = 'Sức khỏe';
-    title = 'Kế hoạch cải thiện thể lực và vóc dáng';
-    advice = `💪 **Nguyên tắc vàng để đạt kết quả bền vững:**
-1. **Calo In < Calo Out (Thâm hụt calo lành mạnh):** Giảm bớt đường ngọt, đồ chiên dầu; ưu tiên đạm sạch và rau xanh.
-2. **Quy tắc 80/20:** 80% phụ thuộc vào dinh dưỡng và giấc ngủ, 20% phụ thuộc vào cường độ vận động.
-3. **Thói quen nhất quán quan trọng hơn tập quá sức:** Bắt đầu từ 20-30 phút/ngày để duy trì không bị kiệt sức.`;
-
-    suggestedTasks = [
-      {
-        title: 'Thiết lập thực đơn ăn uống thâm hụt calo',
-        description: 'Cắt giảm nước ngọt và tinh bột tinh chế, tính toán TDEE và chuẩn bị đồ ăn lành mạnh trong tuần.',
-        category: 'Sức khỏe',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(3),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Tính lượng TDEE và mục tiêu calo mỗi ngày', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Uống đủ 2 - 2.5 lít nước mỗi ngày', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Chuẩn bị hộp đồ ăn trưa giàu đạm và rau củ', completed: false }
-        ],
-        tags: ['Dinh dưỡng', 'EatClean']
-      },
-      {
-        title: 'Lịch tập cardio/chạy bộ 3 buổi mỗi tuần',
-        description: 'Duy trì vận động thể chất vào Thứ 3, Thứ 5 và Thứ 7 lúc 6h30 sáng.',
-        category: 'Sức khỏe',
-        priority: 'medium',
-        status: 'todo',
-        startDate: formatDate(1),
-        dueDate: formatDate(14),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Chạy bộ xen kẽ đi bộ nhanh 3km/buổi', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Thực hiện 10 phút giãn cơ sau khi chạy', completed: false }
-        ],
-        tags: ['Chạy bộ', 'Cardio']
-      },
-      {
-        title: 'Cân đo chỉ số cơ thể định kỳ',
-        description: 'Đo cân nặng và vòng eo vào sáng thứ 2 hàng tuần sau khi thức dậy.',
-        category: 'Sức khỏe',
-        priority: 'low',
-        status: 'todo',
-        startDate: formatDate(7),
-        dueDate: formatDate(28),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Ghi lại cân nặng và số đo 3 vòng vào nhật ký', completed: false }
-        ],
-        tags: ['Đo lường', 'Mục tiêu']
-      }
-    ];
-  }
-  // 3. Dự án / Khởi nghiệp / Kinh doanh / Mở quán / Marketing
-  else if (msg.includes('dự án') || msg.includes('khởi nghiệp') || msg.includes('kinh doanh') || msg.includes('mở quán') || msg.includes('bán hàng') || msg.includes('marketing') || msg.includes('sản phẩm')) {
-    category = 'Công việc';
-    title = 'Kế hoạch triển khai dự án kinh doanh';
-    advice = `🚀 **Lộ trình thực thi tinh gọn (Lean Startup):**
-1. **Xác thực nhu cầu (Validation):** Khảo sát 20-30 khách hàng tiềm năng trước khi đầu tư vốn lớn.
-2. **Sản phẩm khả dụng tối thiểu (MVP):** Tạo ra phiên bản thử nghiệm nhanh chóng để kiểm chứng.
-3. **Quản trị rủi ro & dòng tiền:** Lập bảng dự trù ngân sách ít nhất cho 6 tháng duy trì.`;
-
-    suggestedTasks = [
-      {
-        title: 'Nghiên cứu thị trường và phân tích đối thủ cạnh tranh',
-        description: 'Khảo sát 5 đối thủ trực tiếp trong khu vực về giá bán, menu, điểm mạnh và điểm yếu.',
-        category: 'Công việc',
-        priority: 'urgent',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(5),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Lập bảng phân tích điểm mạnh yếu SWOT', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Phỏng vấn 10 khách hàng thuộc tệp mục tiêu', completed: false }
-        ],
-        tags: ['Khởi nghiệp', 'Nghiên cứu']
-      },
-      {
-        title: 'Dự toán chi phí đầu tư và điểm hòa vốn',
-        description: 'Bóc tách chi phí cố định (mặt bằng, thiết bị) và chi phí biến đổi (nguyên liệu, marketing).',
-        category: 'Tài chính',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(2),
-        dueDate: formatDate(7),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Tính giá vốn sản phẩm (COGS)', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Xác định số lượng đơn hàng cần để đạt điểm hòa vốn', completed: false }
-        ],
-        tags: ['Tài chính', 'Ngân sách']
-      },
-      {
-        title: 'Xây dựng kênh truyền thông & nhận diện thương hiệu',
-        description: 'Tạo Fanpage, thiết kế logo, bộ ấn phẩm truyền thông và chạy chiến dịch tiếp cận đầu tiên.',
-        category: 'Công việc',
-        priority: 'medium',
-        status: 'todo',
-        startDate: formatDate(5),
-        dueDate: formatDate(15),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Thiết kế logo và banner trên Canva/Figma', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Viết 5 bài viết giới thiệu khai trương', completed: false }
-        ],
-        tags: ['Marketing', 'Branding']
-      }
-    ];
-  }
-  // 4. Quản lý thời gian / Năng suất / Đọc sách / Bản thân
-  else if (msg.includes('thời gian') || msg.includes('đọc sách') || msg.includes('thói quen') || msg.includes('năng suất') || msg.includes('pomodoro') || msg.includes('kỷ luật')) {
-    category = 'Cá nhân';
-    title = 'Kế hoạch nâng cao hiệu suất & Kỷ luật bản thân';
-    advice = `⏳ **Bí quyết quản lý thời gian cá nhân:**
-1. **Phương pháp Pomodoro:** 25 phút tập trung cao độ, 5 phút nghỉ ngơi ngắn.
-2. **Quy tắc 2 phút:** Việc gì làm dưới 2 phút hãy làm ngay lập tức, không trì hoãn.
-3. **Thói quen buổi sáng (Morning Routine):** Bắt đầu ngày mới không chạm vào mạng xã hội trong 30 phút đầu tiên.`;
-
-    suggestedTasks = [
-      {
-        title: 'Xây dựng thói quen đọc sách 20 trang mỗi ngày',
-        description: 'Chọn khung giờ trước khi đi ngủ 30 phút, đọc tập trung và gạch chân các ý tưởng tâm đắc.',
-        category: 'Cá nhân',
-        priority: 'medium',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(10),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Chọn 1 cuốn sách phát triển kỹ năng', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Ghi lại 3 bài học áp dụng được sau khi đọc', completed: false }
-        ],
-        tags: ['Đọc sách', 'Thói quen']
-      },
-      {
-        title: 'Áp dụng khung giờ Pomodoro vào công việc hàng ngày',
-        description: 'Thực hiện ít nhất 4 chu kỳ Pomodoro (100 phút tập trung) cho công việc quan trọng nhất.',
-        category: 'Công việc',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(7),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Tắt toàn bộ thông báo điện thoại khi đang tập trung', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Đánh giá mức độ hoàn thành công việc cuối ngày', completed: false }
-        ],
-        tags: ['Pomodoro', 'Năng suất']
-      }
-    ];
-  }
-  // 5. Tổng quát / Kế hoạch chung
-  else {
-    title = `Kế hoạch hành động: "${userMessage.slice(0, 35)}..."`;
-    advice = `💡 **Phân tích mục tiêu theo nguyên tắc S.M.A.R.T:**
-- **Specific (Cụ thể):** Xác định rõ mục tiêu cần đạt được là gì.
-- **Measurable (Đo lường được):** Có con số hoặc mốc cụ thể để kiểm tra.
-- **Achievable (Khả thi):** Chia thành các bước vừa sức để không nản lòng.
-- **Relevant (Thực tế):** Phù hợp với định hướng hiện tại của bạn.
-- **Time-bound (Có hạn chót):** Gắn thời hạn rõ ràng cho từng bước.
-
-Tôi đã xây dựng lộ trình 3 bước hành động cụ thể cho bạn:`;
-
-    suggestedTasks = [
-      {
-        title: `Nghiên cứu & Lên khung mục tiêu: ${userMessage.slice(0, 40)}`,
-        description: 'Thu thập thông tin, xác định các nguồn lực cần thiết và đặt ra tiêu chuẩn hoàn thành.',
-        category: 'Công việc',
-        priority: 'high',
-        status: 'todo',
-        startDate: formatDate(0),
-        dueDate: formatDate(3),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Liệt kê các bước chuẩn bị ban đầu', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Đặt ra tiêu chí đánh giá thành công', completed: false }
-        ],
-        tags: ['Chuẩn bị', 'Lập kế hoạch']
-      },
-      {
-        title: 'Thực thi giai đoạn 1: Triển khai các bước cốt lõi',
-        description: 'Tập trung giải quyết 20% công việc quan trọng nhất mang lại 80% kết quả.',
-        category: 'Công việc',
-        priority: 'urgent',
-        status: 'todo',
-        startDate: formatDate(2),
-        dueDate: formatDate(10),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Thực hiện đầu việc ưu tiên số 1', completed: false },
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Kiểm tra và hiệu chỉnh lại hướng đi', completed: false }
-        ],
-        tags: ['Thực thi', 'Hành động']
-      },
-      {
-        title: 'Tổng kết đánh giá & Tối ưu kết quả',
-        description: 'Xem xét những điều làm tốt và những điểm cần cải thiện cho kế hoạch tiếp theo.',
-        category: 'Cá nhân',
-        priority: 'low',
-        status: 'todo',
-        startDate: formatDate(9),
-        dueDate: formatDate(15),
-        subtasks: [
-          { id: 'sub_' + Math.random().toString(36).substr(2, 6), title: 'Ghi chú bài học kinh nghiệm', completed: false }
-        ],
-        tags: ['Đánh giá']
-      }
-    ];
-  }
-
-  return {
-    reply: advice,
-    suggestedTasks: suggestedTasks
-  };
+  return getUserFromSession(token);
 }
 
-// External LLM API caller (e.g. Google Gemini)
-async function callGeminiAPI(apiKey, prompt, history = []) {
-  const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-  
-  const systemInstruction = `Bạn là Trợ lý AI Chuyên gia Lập Kế Hoạch Cá Nhân và Quản lý Công việc thông minh.
-Nhiệm vụ của bạn:
-1. Luôn phản hồi bằng tiếng Việt thân thiện, súc tích, logic, khích lệ.
-2. Đưa ra lời khuyên thực tế theo phương pháp SMART, Pomodoro, Time-blocking hoặc Eisenhower.
-3. Khi người dùng muốn lập kế hoạch, hãy LUÔN cung cấp danh sách công việc đề xuất ở định dạng JSON ở cuối câu trả lời được bọc trong khối \`\`\`json { "tasks": [ ... ] } \`\`\` để hệ thống tự động bóc tách thành nút bấm cho người dùng thêm vào bảng.
-Mỗi task trong mảng "tasks" cần có:
-- title: Tiêu đề ngắn gọn
-- description: Mô tả chi tiết hành động
-- category: Một trong ['Công việc', 'Học tập', 'Sức khỏe', 'Tài chính', 'Cá nhân']
-- priority: Một trong ['urgent', 'high', 'medium', 'low']
-- dueDate: YYYY-MM-DD (dựa theo ngày hôm nay: ${new Date().toISOString().split('T')[0]})
-- subtasks: Danh sách các bước nhỏ ["bước 1", "bước 2"]
-- tags: Danh sách nhãn ["nhan1", "nhan2"]`;
-
-  const contents = [];
-  if (history && history.length > 0) {
-    history.slice(-6).forEach(h => {
-      contents.push({
-        role: h.role === 'user' ? 'user' : 'model',
-        parts: [{ text: h.content }]
-      });
-    });
-  }
-  contents.push({
-    role: 'user',
-    parts: [{ text: prompt }]
-  });
-
-  const payload = {
-    contents,
-    systemInstruction: {
-      parts: [{ text: systemInstruction }]
-    },
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048
-    }
-  };
-
-  const response = await fetch(geminiEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API Error (${response.status}): ${errorText}`);
-  }
-
-  const result = await response.json();
-  const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || 'Xin lỗi, tôi không thể xử lý yêu cầu lúc này.';
-
-  // Extract JSON tasks if present
-  let suggestedTasks = [];
-  let cleanReply = rawText;
-  const jsonMatch = rawText.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonMatch) {
-    try {
-      const parsed = JSON.parse(jsonMatch[1]);
-      if (parsed.tasks && Array.isArray(parsed.tasks)) {
-        suggestedTasks = parsed.tasks.map(t => ({
-          title: t.title || 'Công việc mới',
-          description: t.description || '',
-          category: t.category || 'Công việc',
-          priority: t.priority || 'medium',
-          status: 'todo',
-          startDate: new Date().toISOString().split('T')[0],
-          dueDate: t.dueDate || new Date().toISOString().split('T')[0],
-          subtasks: (t.subtasks || []).map(st => ({
-            id: 'sub_' + Math.random().toString(36).substr(2, 6),
-            title: typeof st === 'string' ? st : st.title,
-            completed: false
-          })),
-          tags: t.tags || []
-        }));
-      }
-      cleanReply = rawText.replace(/```json[\s\S]*?```/, '').trim();
-    } catch (e) {
-      console.warn('Lỗi parse JSON từ Gemini response:', e);
-    }
-  }
-
-  return {
-    reply: cleanReply,
-    suggestedTasks
-  };
-}
-
-// HTTP Server
-const server = http.createServer(async (req, res) => {
+// Main HTTP request router
+async function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
-  const method = req.method;
+  const method = req.method.toUpperCase();
 
-  // Handle CORS preflight
+  // Handle CORS Preflight
   if (method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Max-Age': '86400'
     });
     return res.end();
   }
 
-  // --- REST API ROUTES ---
+  const db = getDb();
+
+  // ==========================================
+  // API ROUTING (/api/...)
+  // ==========================================
   if (pathname.startsWith('/api/')) {
     try {
-      // 1. GET /api/plans - Lấy danh sách kế hoạch
-      if (pathname === '/api/plans' && method === 'GET') {
-        const plans = readPlans();
-        return sendJSON(res, 200, { success: true, data: plans });
-      }
+      // ----------------------------------------
+      // 1. AUTHENTICATION & PROFILE APIS
+      // ----------------------------------------
 
-      // 2. POST /api/plans - Thêm kế hoạch mới
-      if (pathname === '/api/plans' && method === 'POST') {
+      // POST /api/auth/register
+      if (pathname === '/api/auth/register' && method === 'POST') {
         const body = await parseBody(req);
-        if (!body.title || !body.title.trim()) {
-          return sendJSON(res, 400, { success: false, error: 'Tiêu đề kế hoạch không được để trống' });
+        const { email, password, full_name, dob, gender, personal_goals } = body;
+
+        if (!email || !password || !full_name) {
+          return sendJSON(res, 400, { success: false, message: 'Email, password and full name are required.' });
         }
 
-        const plans = readPlans();
-        const nowIso = new Date().toISOString();
-        const newPlan = {
-          id: 'plan_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex'),
-          title: body.title.trim(),
-          description: body.description ? body.description.trim() : '',
-          category: body.category || 'Công việc',
-          priority: body.priority || 'medium', // urgent, high, medium, low
-          status: body.status || 'todo', // todo, in_progress, completed
-          startDate: body.startDate || nowIso.split('T')[0],
-          dueDate: body.dueDate || nowIso.split('T')[0],
-          tags: Array.isArray(body.tags) ? body.tags : [],
-          subtasks: Array.isArray(body.subtasks) ? body.subtasks.map(s => ({
-            id: s.id || 'sub_' + Math.random().toString(36).substr(2, 7),
-            title: s.title || '',
-            completed: Boolean(s.completed)
-          })) : [],
-          createdAt: nowIso,
-          updatedAt: nowIso
+        const cleanEmail = email.trim().toLowerCase();
+        const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
+        if (existing) {
+          return sendJSON(res, 409, { success: false, message: 'An account with this email already exists.' });
+        }
+
+        const userId = 'usr_' + crypto.randomUUID();
+        const { hash, salt } = hashPassword(password);
+        const now = new Date().toISOString();
+
+        db.prepare(`
+          INSERT INTO users (id, email, password_hash, salt, full_name, avatar, dob, gender, personal_goals, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          userId,
+          cleanEmail,
+          hash,
+          salt,
+          full_name.trim(),
+          body.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cleanEmail)}`,
+          dob || null,
+          gender || null,
+          personal_goals || '',
+          now,
+          now
+        );
+
+        // Create default settings
+        db.prepare(`
+          INSERT INTO user_settings (id, user_id, theme, language, updated_at)
+          VALUES (?, ?, 'light', 'en', ?)
+        `).run('set_' + crypto.randomUUID(), userId, now);
+
+        const { token } = createSession(userId);
+        const user = db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at FROM users WHERE id = ?').get(userId);
+
+        return sendJSON(res, 201, {
+          success: true,
+          message: 'Registration successful! Welcome to LifeCare.',
+          token,
+          user
+        });
+      }
+
+      // POST /api/auth/login
+      if (pathname === '/api/auth/login' && method === 'POST') {
+        const body = await parseBody(req);
+        const { email, password } = body;
+
+        if (!email || !password) {
+          return sendJSON(res, 400, { success: false, message: 'Please provide both email and password.' });
+        }
+
+        const cleanEmail = email.trim().toLowerCase();
+        const user = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
+        if (!user || !verifyPassword(password, user.password_hash, user.salt)) {
+          return sendJSON(res, 401, { success: false, message: 'Invalid email or password.' });
+        }
+
+        const { token } = createSession(user.id);
+        const safeUser = {
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          avatar: user.avatar,
+          dob: user.dob,
+          gender: user.gender,
+          personal_goals: user.personal_goals,
+          created_at: user.created_at
         };
 
-        plans.unshift(newPlan);
-        writePlans(plans);
-        return sendJSON(res, 201, { success: true, data: newPlan });
+        return sendJSON(res, 200, {
+          success: true,
+          message: `Welcome back, ${safeUser.full_name}!`,
+          token,
+          user: safeUser
+        });
       }
 
-      // 3. POST /api/plans/batch - Thêm nhiều kế hoạch (Ví dụ từ gợi ý AI)
-      if (pathname === '/api/plans/batch' && method === 'POST') {
+      // POST /api/auth/logout
+      if (pathname === '/api/auth/logout' && method === 'POST') {
+        const authHeader = req.headers['authorization'] || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+        if (token) deleteSession(token);
+        return sendJSON(res, 200, { success: true, message: 'Logged out successfully.' });
+      }
+
+      // POST /api/auth/forgot-password
+      if (pathname === '/api/auth/forgot-password' && method === 'POST') {
         const body = await parseBody(req);
-        const newItems = Array.isArray(body.plans) ? body.plans : [];
-        if (newItems.length === 0) {
-          return sendJSON(res, 400, { success: false, error: 'Không có kế hoạch nào để thêm' });
+        const { email } = body;
+        if (!email) return sendJSON(res, 400, { success: false, message: 'Email is required.' });
+
+        const user = db.prepare('SELECT id, full_name FROM users WHERE email = ?').get(email.trim().toLowerCase());
+        if (!user) {
+          // Standard security response: don't reveal email existence
+          return sendJSON(res, 200, { success: true, message: 'If this email exists in our records, password reset instructions have been generated.' });
         }
 
-        const plans = readPlans();
-        const nowIso = new Date().toISOString();
-        const addedPlans = [];
+        const resetToken = 'rst_' + crypto.randomBytes(24).toString('hex');
+        const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
+        db.prepare('INSERT INTO password_resets (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)').run(
+          resetToken, user.id, expiresAt, new Date().toISOString()
+        );
 
-        for (const item of newItems) {
-          if (!item.title) continue;
-          const newPlan = {
-            id: 'plan_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex'),
-            title: item.title.trim(),
-            description: item.description ? item.description.trim() : '',
-            category: item.category || 'Công việc',
-            priority: item.priority || 'medium',
-            status: item.status || 'todo',
-            startDate: item.startDate || nowIso.split('T')[0],
-            dueDate: item.dueDate || nowIso.split('T')[0],
-            tags: Array.isArray(item.tags) ? item.tags : [],
-            subtasks: Array.isArray(item.subtasks) ? item.subtasks.map(s => ({
-              id: s.id || 'sub_' + Math.random().toString(36).substr(2, 7),
-              title: s.title || '',
-              completed: Boolean(s.completed)
-            })) : [],
-            createdAt: nowIso,
-            updatedAt: nowIso
-          };
-          plans.unshift(newPlan);
-          addedPlans.push(newPlan);
-        }
-
-        writePlans(plans);
-        return sendJSON(res, 201, { success: true, count: addedPlans.length, data: addedPlans });
+        return sendJSON(res, 200, {
+          success: true,
+          message: 'Password reset token generated successfully. In production, this would be delivered via verified email.',
+          demoResetToken: resetToken
+        });
       }
 
-      // 4. PUT /api/plans/:id - Sửa kế hoạch
-      if (pathname.startsWith('/api/plans/') && method === 'PUT') {
-        const id = pathname.replace('/api/plans/', '');
+      // POST /api/auth/reset-password
+      if (pathname === '/api/auth/reset-password' && method === 'POST') {
         const body = await parseBody(req);
-        const plans = readPlans();
-        const index = plans.findIndex(p => p.id === id);
-
-        if (index === -1) {
-          return sendJSON(res, 404, { success: false, error: 'Không tìm thấy kế hoạch' });
+        const { token, new_password } = body;
+        if (!token || !new_password) {
+          return sendJSON(res, 400, { success: false, message: 'Token and new password are required.' });
         }
 
-        const current = plans[index];
-        const updatedPlan = {
-          ...current,
-          title: body.title !== undefined ? body.title.trim() : current.title,
-          description: body.description !== undefined ? body.description.trim() : current.description,
-          category: body.category !== undefined ? body.category : current.category,
-          priority: body.priority !== undefined ? body.priority : current.priority,
-          status: body.status !== undefined ? body.status : current.status,
-          startDate: body.startDate !== undefined ? body.startDate : current.startDate,
-          dueDate: body.dueDate !== undefined ? body.dueDate : current.dueDate,
-          tags: body.tags !== undefined ? body.tags : current.tags,
-          subtasks: body.subtasks !== undefined ? body.subtasks : current.subtasks,
-          updatedAt: new Date().toISOString()
-        };
-
-        plans[index] = updatedPlan;
-        writePlans(plans);
-        return sendJSON(res, 200, { success: true, data: updatedPlan });
-      }
-
-      // 5. DELETE /api/plans/:id - Xoá kế hoạch
-      if (pathname.startsWith('/api/plans/') && method === 'DELETE') {
-        const id = pathname.replace('/api/plans/', '');
-        const plans = readPlans();
-        const index = plans.findIndex(p => p.id === id);
-
-        if (index === -1) {
-          return sendJSON(res, 404, { success: false, error: 'Không tìm thấy kế hoạch để xoá' });
+        const resetRecord = db.prepare('SELECT user_id, expires_at FROM password_resets WHERE token = ?').get(token);
+        if (!resetRecord || Date.now() > resetRecord.expires_at) {
+          return sendJSON(res, 400, { success: false, message: 'Reset token is invalid or has expired.' });
         }
 
-        const deleted = plans.splice(index, 1)[0];
-        writePlans(plans);
-        return sendJSON(res, 200, { success: true, message: 'Đã xoá kế hoạch thành công', deleted });
+        const { hash, salt } = hashPassword(new_password);
+        db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
+          hash, salt, new Date().toISOString(), resetRecord.user_id
+        );
+        db.prepare('DELETE FROM password_resets WHERE token = ?').run(token);
+
+        return sendJSON(res, 200, { success: true, message: 'Password updated successfully. You may now log in.' });
       }
 
-      // 6. POST /api/ai/chat - Trò chuyện với Trợ lý AI Lập Kế Hoạch
-      if (pathname === '/api/ai/chat' && method === 'POST') {
+      // GET /api/auth/me
+      if (pathname === '/api/auth/me' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized. Please sign in.' });
+        return sendJSON(res, 200, { success: true, user });
+      }
+
+      // PUT /api/user/profile
+      if (pathname === '/api/user/profile' && method === 'PUT') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
         const body = await parseBody(req);
-        const message = body.message || '';
-        const history = body.history || [];
-        const apiKey = body.apiKey || process.env.GEMINI_API_KEY || '';
-        const provider = body.provider || (apiKey ? 'gemini' : 'builtin');
+        const { full_name, dob, gender, personal_goals, avatar } = body;
+        const now = new Date().toISOString();
 
-        if (!message.trim()) {
-          return sendJSON(res, 400, { success: false, error: 'Tin nhắn không được để trống' });
+        db.prepare(`
+          UPDATE users
+          SET full_name = COALESCE(?, full_name),
+              dob = COALESCE(?, dob),
+              gender = COALESCE(?, gender),
+              personal_goals = COALESCE(?, personal_goals),
+              avatar = COALESCE(?, avatar),
+              updated_at = ?
+          WHERE id = ?
+        `).run(full_name, dob, gender, personal_goals, avatar, now, user.id);
+
+        const updated = db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at FROM users WHERE id = ?').get(user.id);
+        return sendJSON(res, 200, { success: true, message: 'Profile updated successfully.', user: updated });
+      }
+
+      // PUT /api/user/password
+      if (pathname === '/api/user/password' && method === 'PUT') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const body = await parseBody(req);
+        const { current_password, new_password } = body;
+        if (!current_password || !new_password) {
+          return sendJSON(res, 400, { success: false, message: 'Current and new password are required.' });
         }
 
-        const currentPlans = readPlans();
+        const fullUser = db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(user.id);
+        if (!verifyPassword(current_password, fullUser.password_hash, fullUser.salt)) {
+          return sendJSON(res, 400, { success: false, message: 'Incorrect current password.' });
+        }
 
-        if (provider === 'gemini' && apiKey) {
-          try {
-            const aiResult = await callGeminiAPI(apiKey, message, history);
-            return sendJSON(res, 200, { success: true, provider: 'gemini', ...aiResult });
-          } catch (apiErr) {
-            console.error('Gemini API call failed, falling back to built-in AI:', apiErr.message);
-            // Fallback gracefully to built-in AI
-            const fallbackResult = generateAIPlanResponse(message, currentPlans);
-            return sendJSON(res, 200, {
-              success: true,
-              provider: 'builtin (fallback)',
-              reply: `*(Lưu ý: API Key gặp lỗi hoặc chưa kích hoạt, trợ lý đang phản hồi qua Bộ não AI tích hợp sẵn)*\n\n` + fallbackResult.reply,
-              suggestedTasks: fallbackResult.suggestedTasks
-            });
+        const { hash, salt } = hashPassword(new_password);
+        db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
+          hash, salt, new Date().toISOString(), user.id
+        );
+
+        return sendJSON(res, 200, { success: true, message: 'Password changed successfully.' });
+      }
+
+      // GET & PUT /api/user/settings
+      if (pathname === '/api/user/settings') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        if (method === 'GET') {
+          let settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+          if (!settings) {
+            db.prepare('INSERT INTO user_settings (id, user_id, updated_at) VALUES (?, ?, ?)').run('set_' + crypto.randomUUID(), user.id, new Date().toISOString());
+            settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
           }
-        } else {
-          // Use built-in intelligent engine
-          const aiResult = generateAIPlanResponse(message, currentPlans);
-          return sendJSON(res, 200, { success: true, provider: 'builtin', ...aiResult });
+          return sendJSON(res, 200, { success: true, settings });
+        }
+
+        if (method === 'PUT') {
+          const body = await parseBody(req);
+          const now = new Date().toISOString();
+          db.prepare(`
+            UPDATE user_settings
+            SET theme = COALESCE(?, theme),
+                language = COALESCE(?, language),
+                quiet_hours_start = COALESCE(?, quiet_hours_start),
+                quiet_hours_end = COALESCE(?, quiet_hours_end),
+                remind_water = COALESCE(?, remind_water),
+                remind_break = COALESCE(?, remind_break),
+                remind_health = COALESCE(?, remind_health),
+                remind_mood = COALESCE(?, remind_mood),
+                remind_tasks = COALESCE(?, remind_tasks),
+                notification_frequency = COALESCE(?, notification_frequency),
+                updated_at = ?
+            WHERE user_id = ?
+          `).run(
+            body.theme, body.language, body.quiet_hours_start, body.quiet_hours_end,
+            body.remind_water !== undefined ? (body.remind_water ? 1 : 0) : null,
+            body.remind_break !== undefined ? (body.remind_break ? 1 : 0) : null,
+            body.remind_health !== undefined ? (body.remind_health ? 1 : 0) : null,
+            body.remind_mood !== undefined ? (body.remind_mood ? 1 : 0) : null,
+            body.remind_tasks !== undefined ? (body.remind_tasks ? 1 : 0) : null,
+            body.notification_frequency,
+            now,
+            user.id
+          );
+
+          const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+          return sendJSON(res, 200, { success: true, message: 'Settings saved successfully.', settings });
         }
       }
 
-      // 7. GET /api/export - Xuất toàn bộ dữ liệu kế hoạch
-      if (pathname === '/api/export' && method === 'GET') {
-        const plans = readPlans();
+      // ----------------------------------------
+      // 2. DASHBOARD DATA AGGREGATION API
+      // ----------------------------------------
+      if (pathname === '/api/dashboard' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const todayStr = (parsedUrl.query.date || new Date().toISOString().split('T')[0]);
+
+        // Tasks for today
+        const todayTasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date = ? ORDER BY start_time ASC').all(user.id, todayStr);
+        const completedTasks = todayTasks.filter(t => t.status === 'completed').length;
+        const remainingTasks = todayTasks.length - completedTasks;
+
+        // Upcoming events/tasks
+        const upcomingTasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? ORDER BY date ASC, start_time ASC LIMIT 5').all(user.id, todayStr);
+
+        // Daily health check-in status
+        const todayHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+
+        // Latest emotional status & past 7 days mood
+        const latestMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 1').get(user.id);
+        const pastWeekMoods = db.prepare('SELECT mood, emoji, checkin_date, stress_level FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+
+        // Health reminders count
+        const unreadNotifs = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0').get(user.id).count;
+
+        return sendJSON(res, 200, {
+          success: true,
+          data: {
+            user,
+            currentDate: todayStr,
+            taskStats: {
+              total: todayTasks.length,
+              completed: completedTasks,
+              remaining: remainingTasks,
+              completionRate: todayTasks.length > 0 ? Math.round((completedTasks / todayTasks.length) * 100) : 0
+            },
+            todayTasks,
+            upcomingTasks,
+            healthStatus: {
+              todayCheckinCompleted: !!todayHealth,
+              latestPhysical: todayHealth || null
+            },
+            emotionalStatus: {
+              latestMood: latestMood || null,
+              weeklyOverview: pastWeekMoods.reverse()
+            },
+            unreadNotifs
+          }
+        });
+      }
+
+      // ----------------------------------------
+      // 3. SMART PLANNER & TASK MANAGEMENT APIS
+      // ----------------------------------------
+
+      // GET /api/tasks (Filter by date, category, priority, search)
+      if (pathname === '/api/tasks' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const { date, month, category, priority, search, status } = parsedUrl.query;
+        let query = 'SELECT * FROM tasks WHERE user_id = ?';
+        const params = [user.id];
+
+        if (date) {
+          query += ' AND date = ?';
+          params.push(date);
+        } else if (month) {
+          // 'YYYY-MM'
+          query += ' AND date LIKE ?';
+          params.push(`${month}%`);
+        }
+
+        if (category && category !== 'all') {
+          query += ' AND category = ?';
+          params.push(category);
+        }
+
+        if (priority && priority !== 'all') {
+          query += ' AND priority = ?';
+          params.push(priority);
+        }
+
+        if (status && status !== 'all') {
+          query += ' AND status = ?';
+          params.push(status);
+        }
+
+        if (search) {
+          query += ' AND (title LIKE ? OR description LIKE ?)';
+          params.push(`%${search}%`, `%${search}%`);
+        }
+
+        query += ' ORDER BY date ASC, start_time ASC';
+        const tasks = db.prepare(query).all(...params);
+
+        return sendJSON(res, 200, { success: true, tasks });
+      }
+
+      // POST /api/tasks
+      if (pathname === '/api/tasks' && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const body = await parseBody(req);
+        const { title, description, category, priority, date, start_time, end_time, is_event, reminder_time } = body;
+
+        if (!title || !category || !date) {
+          return sendJSON(res, 400, { success: false, message: 'Title, category, and date are required.' });
+        }
+
+        const taskId = 'task_' + crypto.randomUUID();
+        const now = new Date().toISOString();
+
+        db.prepare(`
+          INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        `).run(
+          taskId,
+          user.id,
+          title.trim(),
+          description || '',
+          category,
+          priority || 'medium',
+          date,
+          start_time || null,
+          end_time || null,
+          is_event ? 1 : 0,
+          reminder_time || null,
+          now,
+          now
+        );
+
+        const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+        return sendJSON(res, 201, { success: true, message: 'Task created successfully.', task: created });
+      }
+
+      // PUT /api/tasks/:id
+      if (pathname.startsWith('/api/tasks/') && method === 'PUT') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const taskId = pathname.replace('/api/tasks/', '');
+        const body = await parseBody(req);
+        const now = new Date().toISOString();
+
+        const existing = db.prepare('SELECT id FROM tasks WHERE id = ? AND user_id = ?').get(taskId, user.id);
+        if (!existing) {
+          return sendJSON(res, 404, { success: false, message: 'Task not found or unauthorized.' });
+        }
+
+        db.prepare(`
+          UPDATE tasks
+          SET title = COALESCE(?, title),
+              description = COALESCE(?, description),
+              category = COALESCE(?, category),
+              priority = COALESCE(?, priority),
+              date = COALESCE(?, date),
+              start_time = COALESCE(?, start_time),
+              end_time = COALESCE(?, end_time),
+              status = COALESCE(?, status),
+              is_event = COALESCE(?, is_event),
+              reminder_time = COALESCE(?, reminder_time),
+              updated_at = ?
+          WHERE id = ? AND user_id = ?
+        `).run(
+          body.title, body.description, body.category, body.priority,
+          body.date, body.start_time, body.end_time, body.status,
+          body.is_event !== undefined ? (body.is_event ? 1 : 0) : null,
+          body.reminder_time,
+          now,
+          taskId,
+          user.id
+        );
+
+        const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+        return sendJSON(res, 200, { success: true, message: 'Task updated successfully.', task: updated });
+      }
+
+      // DELETE /api/tasks/:id
+      if (pathname.startsWith('/api/tasks/') && method === 'DELETE') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const taskId = pathname.replace('/api/tasks/', '');
+        const resDelete = db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(taskId, user.id);
+        if (resDelete.changes === 0) {
+          return sendJSON(res, 404, { success: false, message: 'Task not found or unauthorized.' });
+        }
+
+        return sendJSON(res, 200, { success: true, message: 'Task deleted successfully.' });
+      }
+
+      // ----------------------------------------
+      // 4. PHYSICAL HEALTH CHECK-INS APIS
+      // ----------------------------------------
+
+      // GET /api/health
+      if (pathname === '/api/health' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const limit = parseInt(parsedUrl.query.limit) || 30;
+        const records = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limit);
+        return sendJSON(res, 200, { success: true, records });
+      }
+
+      // POST /api/health
+      if (pathname === '/api/health' && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const body = await parseBody(req);
+        const { checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_intake, discomfort, notes } = body;
+
+        const date = checkin_date || new Date().toISOString().split('T')[0];
+        const existing = db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
+
+        let id = existing ? existing.id : ('hlth_' + crypto.randomUUID());
+        const now = new Date().toISOString();
+
+        if (existing) {
+          db.prepare(`
+            UPDATE health_checkins
+            SET sleep_duration = ?, sleep_quality = ?, physical_condition = ?, energy_level = ?, exercise_status = ?, water_intake = ?, discomfort = ?, notes = ?
+            WHERE id = ? AND user_id = ?
+          `).run(
+            sleep_duration !== undefined ? sleep_duration : null,
+            sleep_quality || null,
+            physical_condition || null,
+            energy_level !== undefined ? energy_level : null,
+            exercise_status || null,
+            water_intake !== undefined ? water_intake : null,
+            discomfort || null,
+            notes || null,
+            id,
+            user.id
+          );
+        } else {
+          db.prepare(`
+            INSERT INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_intake, discomfort, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            id,
+            user.id,
+            date,
+            sleep_duration !== undefined ? sleep_duration : null,
+            sleep_quality || null,
+            physical_condition || null,
+            energy_level !== undefined ? energy_level : null,
+            exercise_status || null,
+            water_intake !== undefined ? water_intake : null,
+            discomfort || null,
+            notes || null,
+            now
+          );
+        }
+
+        // Medical advisory notice check
+        let adviceNotice = null;
+        if (physical_condition === 'Unwell' || (discomfort && discomfort.length > 5)) {
+          adviceNotice = "Friendly Health Note: If you feel unwell or experience persistent pain or acute distress, remember that LifeCare does not replace medical advice. Please consult a qualified physician or professional healthcare provider.";
+        }
+
+        const record = db.prepare('SELECT * FROM health_checkins WHERE id = ?').get(id);
+        return sendJSON(res, 200, { success: true, message: 'Daily physical check-in recorded!', record, adviceNotice });
+      }
+
+      // ----------------------------------------
+      // 5. MENTAL HEALTH & EMOTIONAL WELLNESS APIS
+      // ----------------------------------------
+
+      // GET /api/mood
+      if (pathname === '/api/mood' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const limit = parseInt(parsedUrl.query.limit) || 30;
+        const records = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limit);
+        return sendJSON(res, 200, { success: true, records });
+      }
+
+      // POST /api/mood
+      if (pathname === '/api/mood' && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const body = await parseBody(req);
+        const { checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes } = body;
+
+        if (!mood) {
+          return sendJSON(res, 400, { success: false, message: 'Mood selection is required.' });
+        }
+
+        const date = checkin_date || new Date().toISOString().split('T')[0];
+        const existing = db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
+
+        let id = existing ? existing.id : ('mood_' + crypto.randomUUID());
+        const now = new Date().toISOString();
+
+        if (existing) {
+          db.prepare(`
+            UPDATE mood_checkins
+            SET mood = ?, emoji = ?, stress_level = ?, motivation_level = ?, connected_score = ?, relaxed_score = ?, anxiety_score = ?, emotional_notes = ?
+            WHERE id = ? AND user_id = ?
+          `).run(
+            mood, emoji || null, stress_level || null, motivation_level || null,
+            connected_score || null, relaxed_score || null, anxiety_score || null,
+            emotional_notes || null, id, user.id
+          );
+        } else {
+          db.prepare(`
+            INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            id, user.id, date, mood, emoji || null, stress_level || null, motivation_level || null,
+            connected_score || null, relaxed_score || null, anxiety_score || null,
+            emotional_notes || null, now
+          );
+        }
+
+        // Supportive message generation based on mood and feelings
+        let supportiveMessage = "Thank you for taking time to check in with yourself. Every emotional state is valid.";
+        if (mood === 'Tired') supportiveMessage = "Remember to take a break. You deserve some gentle time to rest and recharge.";
+        else if (mood === 'Stressed' || mood === 'Overwhelmed') supportiveMessage = "Take a slow, deep breath. You don't have to solve everything at once. Focus on one gentle step.";
+        else if (mood === 'Happy' || mood === 'Excited') supportiveMessage = "That's wonderful! Keep enjoying the little things in life and savor this moment.";
+        else if (mood === 'Relaxed') supportiveMessage = "Peace of mind is a beautiful gift. Enjoy this serene balance.";
+        else if (mood === 'Anxious') supportiveMessage = "Ground yourself: feel your feet on the floor, unclench your jaw, and know that this moment will pass safely.";
+
+        const record = db.prepare('SELECT * FROM mood_checkins WHERE id = ?').get(id);
+        return sendJSON(res, 200, { success: true, message: 'Emotional reflection saved.', record, supportiveMessage });
+      }
+
+      // ----------------------------------------
+      // 6. 5 ADDED FEATURES (AI, TIMELINE, SCHEDULE REC, WEEKLY REPORT, DAILY QUICK CHECK-IN)
+      // ----------------------------------------
+
+      // Feature #1: Daily Quick Check-in prompt & bundle submit
+      // GET /api/checkin/status - checks what has been submitted today
+      if (pathname === '/api/checkin/status' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const todayStr = new Date().toISOString().split('T')[0];
+        const health = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+        const mood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+
+        return sendJSON(res, 200, {
+          success: true,
+          today: todayStr,
+          hasHealth: !!health,
+          hasMood: !!mood,
+          isComplete: !!(health && mood),
+          healthRecord: health || null,
+          moodRecord: mood || null
+        });
+      }
+
+      // POST /api/checkin/quick - single 30-60 second rapid checkin
+      if (pathname === '/api/checkin/quick' && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const body = await parseBody(req);
+        const todayStr = new Date().toISOString().split('T')[0];
+        const now = new Date().toISOString();
+
+        // 1. Health part
+        if (body.physical_condition || body.sleep_duration !== undefined || body.water_intake !== undefined) {
+          const existingHealth = db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+          if (existingHealth) {
+            db.prepare(`
+              UPDATE health_checkins
+              SET physical_condition = COALESCE(?, physical_condition),
+                  sleep_duration = COALESCE(?, sleep_duration),
+                  water_intake = COALESCE(?, water_intake),
+                  energy_level = COALESCE(?, energy_level)
+              WHERE id = ?
+            `).run(body.physical_condition || null, body.sleep_duration || null, body.water_intake || null, body.energy_level || null, existingHealth.id);
+          } else {
+            db.prepare(`
+              INSERT INTO health_checkins (id, user_id, checkin_date, physical_condition, sleep_duration, water_intake, energy_level, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run('hlth_' + crypto.randomUUID(), user.id, todayStr, body.physical_condition || 'Good', body.sleep_duration || 7, body.water_intake || 2, body.energy_level || 4, now);
+          }
+        }
+
+        // 2. Mood part
+        if (body.mood) {
+          const existingMood = db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+          if (existingMood) {
+            db.prepare(`
+              UPDATE mood_checkins
+              SET mood = ?, emoji = COALESCE(?, emoji), stress_level = COALESCE(?, stress_level)
+              WHERE id = ?
+            `).run(body.mood, body.emoji || null, body.stress_level || null, existingMood.id);
+          } else {
+            db.prepare(`
+              INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run('mood_' + crypto.randomUUID(), user.id, todayStr, body.mood, body.emoji || '🙂', body.stress_level || 2, now);
+          }
+        }
+
+        return sendJSON(res, 200, {
+          success: true,
+          message: 'Quick check-in completed in under a minute! Have a balanced day.'
+        });
+      }
+
+      // Feature #2: AI Wellness Assistant Chat
+      // GET /api/ai/messages - retrieve chat history
+      if (pathname === '/api/ai/messages' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const history = db.prepare('SELECT id, role, message, created_at FROM ai_chats WHERE user_id = ? ORDER BY created_at ASC LIMIT 50').all(user.id);
+        return sendJSON(res, 200, { success: true, messages: history });
+      }
+
+      // POST /api/ai/chat - send prompt to assistant
+      if (pathname === '/api/ai/chat' && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const body = await parseBody(req);
+        const userMessage = body.message || '';
+        if (!userMessage.trim()) {
+          return sendJSON(res, 400, { success: false, message: 'Message is required.' });
+        }
+
+        const now = new Date().toISOString();
+        const userChatId = 'chat_' + crypto.randomUUID();
+        db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
+          userChatId, user.id, 'user', userMessage, now
+        );
+
+        // Fetch user context for tailored wellness insights
+        const recentHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const recentMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 20').all(user.id);
+
+        const aiResult = generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks });
+
+        const aiChatId = 'chat_' + crypto.randomUUID();
+        db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
+          aiChatId, user.id, 'assistant', aiResult.reply, new Date().toISOString()
+        );
+
+        return sendJSON(res, 200, {
+          success: true,
+          reply: aiResult.reply,
+          type: aiResult.type,
+          suggestedTasks: aiResult.suggestedTasks || []
+        });
+      }
+
+      // Feature #3: Personal Health Timeline API
+      // GET /api/timeline?range=7days|30days|year
+      if (pathname === '/api/timeline' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const range = parsedUrl.query.range || '30days';
+        let limitDays = 30;
+        if (range === '7days') limitDays = 7;
+        if (range === 'year') limitDays = 365;
+
+        // Fetch health & mood records merged into chronological date cards
+        const health = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limitDays);
+        const mood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limitDays);
+        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 200').all(user.id);
+
+        // Group by date
+        const timelineMap = new Map();
+
+        health.forEach(h => {
+          if (!timelineMap.has(h.checkin_date)) timelineMap.set(h.checkin_date, { date: h.checkin_date });
+          timelineMap.get(h.checkin_date).health = h;
+        });
+
+        mood.forEach(m => {
+          if (!timelineMap.has(m.checkin_date)) timelineMap.set(m.checkin_date, { date: m.checkin_date });
+          timelineMap.get(m.checkin_date).mood = m;
+        });
+
+        tasks.forEach(t => {
+          if (timelineMap.has(t.date)) {
+            const entry = timelineMap.get(t.date);
+            if (!entry.tasks) entry.tasks = [];
+            entry.tasks.push(t);
+          }
+        });
+
+        const timelineList = Array.from(timelineMap.values()).sort((a, b) => b.date.localeCompare(a.date));
+
+        return sendJSON(res, 200, {
+          success: true,
+          range,
+          timeline: timelineList
+        });
+      }
+
+      // Feature #4: Smart Schedule Recommendation API
+      if (pathname === '/api/schedule/recommendations' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
+        const recs = analyzeScheduleBalance(tasks);
+
+        return sendJSON(res, 200, { success: true, ...recs });
+      }
+
+      // Feature #5: Weekly Personal Report API
+      if (pathname === '/api/reports/weekly' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
+        const recentHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const recentMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+
+        const report = buildWeeklyReportData(tasks, recentHealth, recentMood);
+
+        return sendJSON(res, 200, {
+          success: true,
+          report: {
+            ...report,
+            generatedAt: new Date().toISOString()
+          }
+        });
+      }
+
+      // ----------------------------------------
+      // 7. STATISTICS & CHARTS DATA APIS
+      // ----------------------------------------
+      if (pathname === '/api/statistics' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const days = parseInt(parsedUrl.query.days) || 7;
+
+        const tasks = db.prepare('SELECT category, priority, status, date FROM tasks WHERE user_id = ?').all(user.id);
+        const health = db.prepare('SELECT checkin_date, sleep_duration, water_intake, energy_level, physical_condition FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, days);
+        const mood = db.prepare('SELECT checkin_date, mood, stress_level, motivation_level FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, days);
+
+        // Productivity by category
+        const categoryCounts = {};
+        tasks.forEach(t => {
+          categoryCounts[t.category] = (categoryCounts[t.category] || 0) + 1;
+        });
+
+        // Mood distribution
+        const moodCounts = {};
+        mood.forEach(m => {
+          moodCounts[m.mood] = (moodCounts[m.mood] || 0) + 1;
+        });
+
+        return sendJSON(res, 200, {
+          success: true,
+          stats: {
+            categoryCounts,
+            moodCounts,
+            healthHistory: health.reverse(),
+            moodHistory: mood.reverse(),
+            totalTasks: tasks.length,
+            completedTasks: tasks.filter(t => t.status === 'completed').length
+          }
+        });
+      }
+
+      // ----------------------------------------
+      // 8. NOTIFICATIONS & REMINDERS APIS
+      // ----------------------------------------
+      if (pathname === '/api/notifications') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        if (method === 'GET') {
+          const notifs = db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30').all(user.id);
+          return sendJSON(res, 200, { success: true, notifications: notifs });
+        }
+
+        if (method === 'POST') {
+          const body = await parseBody(req);
+          const { title, message, notification_type, notification_time } = body;
+          if (!title || !message) return sendJSON(res, 400, { success: false, message: 'Title and message required.' });
+
+          const id = 'notif_' + crypto.randomUUID();
+          db.prepare(`
+            INSERT INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)
+          `).run(id, user.id, title, message, notification_type || 'schedule', notification_time || '12:00', new Date().toISOString());
+
+          return sendJSON(res, 201, { success: true, id });
+        }
+      }
+
+      // Mark notification as read
+      if (pathname.startsWith('/api/notifications/') && pathname.endsWith('/read') && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const notifId = pathname.split('/')[3];
+        db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?').run(notifId, user.id);
+        return sendJSON(res, 200, { success: true });
+      }
+
+      // ----------------------------------------
+      // 9. DATA PRIVACY, EXPORT & CLEAR HISTORY APIS
+      // ----------------------------------------
+      if (pathname === '/api/user/export' && method === 'GET') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
+        const health = db.prepare('SELECT * FROM health_checkins WHERE user_id = ?').all(user.id);
+        const mood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ?').all(user.id);
+        const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+
+        const exportPayload = {
+          lifecare_export_version: '1.0',
+          export_date: new Date().toISOString(),
+          user: {
+            id: user.id,
+            email: user.email,
+            full_name: user.full_name,
+            dob: user.dob,
+            gender: user.gender,
+            personal_goals: user.personal_goals
+          },
+          settings,
+          tasks,
+          health_checkins: health,
+          mood_checkins: mood
+        };
+
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
-          'Content-Disposition': `attachment; filename="ke_hoach_${new Date().toISOString().split('T')[0]}.json"`
+          'Content-Disposition': `attachment; filename="lifecare-data-${user.id}.json"`
         });
-        return res.end(JSON.stringify(plans, null, 2));
+        return res.end(JSON.stringify(exportPayload, null, 2));
       }
 
-      // 8. POST /api/import - Nhập dữ liệu
-      if (pathname === '/api/import' && method === 'POST') {
-        const body = await parseBody(req);
-        if (!Array.isArray(body.plans)) {
-          return sendJSON(res, 400, { success: false, error: 'Dữ liệu không đúng định dạng danh sách kế hoạch' });
-        }
-        writePlans(body.plans);
-        return sendJSON(res, 200, { success: true, count: body.plans.length });
+      // Clear health and mood history
+      if (pathname === '/api/user/clear-health' && method === 'POST') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        db.prepare('DELETE FROM health_checkins WHERE user_id = ?').run(user.id);
+        db.prepare('DELETE FROM mood_checkins WHERE user_id = ?').run(user.id);
+
+        return sendJSON(res, 200, { success: true, message: 'Health and mood history permanently cleared.' });
       }
 
-      // 9. GET /api/mental-health - Lịch sử khảo sát tâm lý
-      if (pathname === '/api/mental-health' && method === 'GET') {
-        const records = readMentalHealth();
-        return sendJSON(res, 200, { success: true, data: records });
+      // Delete account permanently
+      if (pathname === '/api/user/account' && method === 'DELETE') {
+        const user = getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        return sendJSON(res, 200, { success: true, message: 'Your account and all associated data have been permanently removed.' });
       }
 
-      // 10. POST /api/mental-health - Lưu khảo sát tâm lý mới
-      if (pathname === '/api/mental-health' && method === 'POST') {
-        const body = await parseBody(req);
-        const records = readMentalHealth();
-        const record = {
-          id: 'mh_' + Date.now(),
-          timestamp: new Date().toISOString(),
-          mood: body.mood || 'normal',
-          stressLevel: Number(body.stressLevel) || 5,
-          energyLevel: Number(body.energyLevel) || 5,
-          score: Number(body.score) || 70,
-          status: body.status || 'Bình thường',
-          answers: body.answers || {},
-          recommendations: body.recommendations || []
-        };
-        records.unshift(record);
-        // Keep max 50 records
-        if (records.length > 50) records.length = 50;
-        writeMentalHealth(records);
-        return sendJSON(res, 201, { success: true, data: record });
-      }
-
-      // 404 for unknown API
-      return sendJSON(res, 404, { success: false, error: 'Endpoint không tồn tại' });
-    } catch (apiError) {
-      console.error('Lỗi API nội bộ:', apiError);
-      return sendJSON(res, 500, { success: false, error: apiError.message || 'Lỗi máy chủ nội bộ' });
+      // If no API route matches
+      return sendJSON(res, 404, { success: false, message: 'API route not found' });
+    } catch (apiErr) {
+      console.error('API Error:', apiErr);
+      return sendJSON(res, 500, { success: false, message: 'Internal server error: ' + apiErr.message });
     }
   }
 
-  // --- STATIC FILE SERVING ---
+  // ==========================================
+  // STATIC ASSET SERVING
+  // ==========================================
   let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
-
-  // Prevent directory traversal
-  if (!filePath.startsWith(PUBLIC_DIR)) {
-    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-    return res.end('Truy cập bị từ chối');
-  }
 
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
-      // If file not found, try index.html (SPA fallback)
-      const indexPath = path.join(PUBLIC_DIR, 'index.html');
-      fs.readFile(indexPath, (readErr, content) => {
-        if (readErr) {
-          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-          return res.end('404 - Không tìm thấy trang');
-        }
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(content);
-      });
-      return;
+      // Fallback for SPA routing to index.html if not an explicit asset
+      const ext = path.extname(pathname);
+      if (!ext) {
+        filePath = path.join(PUBLIC_DIR, 'index.html');
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        return res.end('404 Not Found');
+      }
     }
 
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
-    const responseHeaders = { 'Content-Type': contentType };
-    if (pathname === '/sw.js') {
-      responseHeaders['Service-Worker-Allowed'] = '/';
-      responseHeaders['Cache-Control'] = 'no-cache';
-    }
-
     fs.readFile(filePath, (readErr, content) => {
       if (readErr) {
-        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('Lỗi đọc tệp tĩnh');
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        return res.end('Error loading file');
       }
-      res.writeHead(200, responseHeaders);
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=86400'
+      });
       res.end(content);
     });
   });
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`====================================================`);
-  console.log(`🚀 Ứng dụng Lập Kế Hoạch & Trợ Lý AI đã sẵn sàng!`);
-  console.log(`🌐 Truy cập tại: http://localhost:${PORT}`);
-  console.log(`====================================================`);
-});
+// Start server if run directly
+if (require.main === module) {
+  ensureDemoUser();
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, () => {
+    console.log('====================================================');
+    console.log('🌿 LifeCare – Your Life, Your Balance server online!');
+    console.log(`🌐 Server running at: http://localhost:${PORT}`);
+    console.log('🔑 Demo account: alex.balance@lifecare.app / LifeCare2026!');
+    console.log('====================================================');
+  });
+}
+
+module.exports = handleRequest;

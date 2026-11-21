@@ -1,75 +1,69 @@
-# 🌟 PlanMaster AI - Ứng Dụng Lập Kế Hoạch, Khảo Sát Tâm Lý & AI Camera (Teachable Machine)
+# LifeCare – Your Life, Your Balance 🌿
 
-Một ứng dụng Progressive Web App (PWA) hiện đại, toàn diện và trực quan. Tích hợp:
-1. **Quản lý kế hoạch chuyên sâu** (Thêm, Sửa, Xoá, Checklist, Kanban, Danh sách).
-2. **Khảo sát sức khỏe tâm lý** theo chuẩn WHO-5 & PHQ-4.
-3. **AI Camera tích hợp Google Teachable Machine** nhận diện biểu cảm, độ tập trung và mức độ mệt mỏi thời gian thực.
-4. **Hệ thống cảnh báo & thông báo lịch trình** khẩn cấp (Web Notifications, Chime sound).
-5. **Trợ lý AI (PlanBot)** tư vấn phương pháp S.M.A.R.T và tự động đồng bộ kế hoạch 1-click.
+> Modern, responsive, full-stack personal planner and holistic health care web application built to help individuals balance daily tasks, physical health, and emotional well-being.
 
 ---
 
-## 🚀 Truy Cập Nhanh
+## 🌟 Key Capabilities & Architecture
 
-Ứng dụng đang hoạt động tại:
-👉 **[http://localhost:3000](http://localhost:3000)**
+### 1. User Authentication & Private Data Vault
+- **Multi-user Authentication:** Registration, login, session tokens, password recovery, profile editing (name, DOB, gender, wellness goals, avatar), and password management.
+- **Privacy & Isolation:** Strict database row-level user scoping (`WHERE user_id = ?`) ensuring no user can view or modify another person's schedules, check-ins, or reflections.
+- **Data Privacy & GDPR-friendly Controls:** Export all user data as JSON (`/api/user/export`), clear health and mood history, and permanent account deletion.
 
----
+### 2. Main Dashboard
+- **Contextual Greeting:** Dynamic greeting adapting to the time of day (`Good morning`, `Good afternoon`, `Good evening`), with user's name and current date.
+- **Daily Overview Metrics:** Real-time counters for completed tasks, remaining tasks, completion rate %, sleep recorded, and emotional state.
+- **Quick Actions:** Rapid 30-second daily check-in trigger, new task modal launcher, physical log, and mood reflection shortcuts.
+- **Proactive Prompts:** Proactively surfaces a daily check-in banner if today's check-in hasn't been completed.
 
-## 📷 Tính Năng Mới: Tích Hợp Google Teachable Machine
+### 3. Smart Planner – Schedule Management
+- **Calendar Views:** Month grid view, Week view, and Day view.
+- **Task & Event Features:** Title, detailed description, category tagging (`Study`, `Work`, `Exercise`, `Personal`, `Rest`, `Other`), priority levels (`Low`, `Medium`, `High`), dates, start & end times, and interactive completion checkboxes.
+- **Search & Filters:** Real-time search by keywords, category filter, and priority filter.
 
-Nằm tại Tab **"AI Camera (Teachable Machine)"**:
-- **Quét Camera thời gian thực**: Sử dụng Webcam để nhận diện biểu cảm khuôn mặt và trạng thái cơ thể.
-- **Bảng xác suất AI sống động**:
-  - 🌟 **Tươi Cười & Tích Cực**
-  - 🎯 **Tập Trung Cao Độ**
-  - 🥱 **Mệt Mỏi / Cần Nghỉ**
-  - 😣 **Áp Lực / Căng Thẳng**
-- **Đồng bộ 1-Chạm vào Khảo Sát Tâm Lý**:
-  - Bấm nút **"🧘 Áp Dụng Vào Khảo Sát Tâm Lý"** để hệ thống tự động điền kết quả nhận diện camera vào bảng kiểm tra sức khỏe tinh thần.
-- **Đồng bộ cùng Trợ Lý AI**:
-  - Bấm nút **"🤖 Nhờ AI Đề Xuất Lịch Trình"** để PlanBot AI đọc trạng thái cảm xúc thực tế và gợi ý kế hoạch cân bằng phù hợp.
-- **Hỗ trợ nạp Model riêng của bạn (Custom Teachable Machine Model)**:
-  - Cho phép dán bất kỳ đường dẫn model nào bạn đã huấn luyện trên [teachablemachine.withgoogle.com](https://teachablemachine.withgoogle.com/).
-  - Tự động nạp `model.json` và `metadata.json` qua TensorFlow.js và `@teachablemachine/image`.
-  - Có sẵn hướng dẫn 3 bước tự huấn luyện model miễn phí ngay trên giao diện!
+### 4. Physical Health Check-in
+- **Holistic Daily Tracking:** Physical condition (Very Good, Good, Normal, Tired, Unwell), sleep duration (hours) and quality rating, exercise status, water intake (Liters), and interactive 1–5 energy rating buttons.
+- **Discomfort & Symptoms Log:** Capture physical discomfort or tension notes.
+- **Medical Disclaimer Safeguard:** Prominent advisory reminding users that LifeCare does not diagnose diseases or replace professional medical consultations.
 
----
+### 5. Mental Health & Emotional Wellness
+- **Daily Mood Picker:** Interactive mood selector with expressive emojis (Happy 😊, Excited ✨, Relaxed 😌, Normal 🙂, Tired 🥱, Stressed 😣, Sad 😢, Anxious 😰, Overwhelmed 🌪️).
+- **Standardized Reflection Questionnaire:** 1–5 scale questions covering stress frequency, anxiety, motivation, social connectedness, and unwinding time.
+- **Supportive Mindful Guidance:** Tailored encouragement based on reported emotions.
+- **Ethical Boundary & Crisis Resources:** Transparent disclaimer that scores are not psychological diagnoses, accompanied by emergency contact information (e.g. 988 Lifeline).
 
-## 🧠 Tính Năng Khảo Sát Tâm Lý (Mental Health)
+### 6. The 5 Added Innovations
+1. **⚡ Proactive Daily Check-in:** 30–60 second rapid check-in popup capturing mood, sleep, and stress in just three clicks.
+2. **✨ AI Wellness Assistant:** Conversational companion providing mindful advice, time management coaching, break recommendations, and schedule audits.
+3. **📅 Personal Health Timeline:** Visual chronological milestone stream tracking high-energy days, stress days, sleep patterns, and reflective journals over 7 days, 30 days, or a full year.
+4. **💡 Smart Schedule Recommendation:** Engine detecting heavy work/study blocks without rest and advising hydration, walks, and screen breaks.
+5. **📊 Automated Weekly Personal Report:** Comprehensive weekly summary with tasks completed ratio, average sleep duration, positive mood frequency, average stress, and motivational advice for the upcoming week.
 
-- Đo lường cảm xúc, thanh trượt mức độ Stress (1-10) và mức Năng lượng (1-10).
-- 4 câu hỏi trắc nghiệm khoa học đánh giá mức độ lo âu, chất lượng giấc ngủ và gánh nặng công việc.
-- Chẩn đoán điểm số tinh thần (thang điểm 100), đưa ra lời khuyên cá nhân hóa (thở 4-7-8, đi dạo, Pomodoro).
-- Nút **"🤖 Nhờ PlanBot AI Điều Chỉnh Lịch Trình"** tự động chuyển điểm tâm lý sang AI để dời việc nặng khi bạn mệt mỏi.
-
----
-
-## 🔔 Hệ Thống Thông Báo Lịch Trình
-
-- **Chuông thông báo (Notification Center)** với đèn đỏ báo động khi có việc gấp.
-- Phân loại rõ ràng:
-  - 🔴 **Quá hạn**: Cần giải quyết ngay hoặc dời hạn.
-  - 🟡 **Cần làm hôm nay**: Hạn chót trong ngày.
-  - 🔵 **Sắp tới hạn ngày mai**.
-- Nút bấm **"Xong"** và **"Xem chi tiết"** trực tiếp từ thông báo.
-- **Thông báo đẩy màn hình (Desktop Notifications)** và âm thanh chuông báo (Chime Sound) qua Web Audio API.
+### 7. Responsive UI & PWA Installation
+- **Palette:** Soft Blue (`#6C9CE8`), Light Green (`#A8D5BA`), Off-white (`#F8FAFC`), Soft Purple (`#B8A5E8`), Dark Gray (`#334155`).
+- **Dark Mode Support:** Smooth light/dark theme toggle with persistent preference.
+- **PWA Ready:** Web app manifest, custom SVG icons, and Service Worker offline caching.
 
 ---
 
-## 📱 Chuẩn Progressive Web App (PWA)
+## 🚀 Getting Started
 
-- Hỗ trợ `manifest.json`, Service Worker lưu cache và hoạt động mượt mà.
-- Nút **"Cài Đặt App"** cho phép cài đặt trực tiếp lên máy tính hoặc điện thoại như phần mềm độc lập.
-- Bố cục vừa vặn, tối ưu cho cả màn hình rộng và thiết bị di động.
+### Prerequisites
+- Node.js (v18+ recommended; built-in SQLite supported on Node 22+)
 
----
-
-## 💻 Cách Khởi Chạy
-
-Mở Terminal tại thư mục dự án và chạy:
+### Run Locally
 ```bash
-npm start
-# hoặc: node server.js
+# Start the server
+node server.js
 ```
-Mở trình duyệt truy cập: **`http://localhost:3000`**
+
+Open your browser at:
+```
+http://localhost:3000
+```
+
+### Pre-seeded Demo Account
+To quickly explore the dashboard with pre-populated realistic historical data:
+- **Email:** `alex.balance@lifecare.app`
+- **Password:** `LifeCare2026!`

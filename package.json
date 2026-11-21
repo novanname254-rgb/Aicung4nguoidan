@@ -14,5 +14,14 @@
     "productivity"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/novanname254-rgb/Aicung4nguoidan.git"
+  },
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/novanname254-rgb/Aicung4nguoidan/issues"
+  },
+  "homepage": "https://github.com/novanname254-rgb/Aicung4nguoidan#readme"
 }

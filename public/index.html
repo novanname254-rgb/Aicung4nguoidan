@@ -1,461 +1,1024 @@
 <!DOCTYPE html>
-<html lang="vi" data-theme="light">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>PlanMaster AI - Lập Kế Hoạch Thông Minh, Khảo Sát Tâm Lý & Nhắc Lịch</title>
-  <meta name="description" content="Nền tảng Progressive Web App lập kế hoạch cá nhân, đo lường sức khỏe tâm lý và nhận thông báo lịch trình tự động." />
+  <title>LifeCare – Your Life, Your Balance</title>
+  <meta name="description" content="Personal planner & health care platform to balance your schedules, physical health, and emotional well-being." />
 
-  <!-- PWA Meta Tags & Icons -->
+  <!-- PWA Meta Tags -->
   <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#6366f1" />
+  <meta name="theme-color" content="#6C9CE8" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="PlanMaster" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="LifeCare" />
   <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
   <link rel="icon" type="image/svg+xml" href="/icons/icon-192.svg" />
 
-  <!-- Stylesheets -->
-  <link rel="stylesheet" href="/css/style.css" />
+  <!-- Google Font & Stylesheets -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css" />
+
+  <!-- Chart.js for Responsive Health & Productivity Analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
-  <div class="app-container">
-    <!-- Top Navigation Bar -->
-    <header class="navbar">
-      <div style="display: flex; align-items: center;">
-        <a href="#" class="brand">
-          <div class="brand-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-          </div>
-          <div class="brand-text">PlanMaster <span>AI</span></div>
-        </a>
-
-        <!-- Main Navigation Segmented Switcher -->
-        <nav class="nav-tab-switcher" role="tablist">
-          <button class="nav-tab-btn active" id="tab-btn-plans" data-tab="plans" role="tab" aria-selected="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>
-            <span>Kế Hoạch</span>
-          </button>
-          <button class="nav-tab-btn" id="tab-btn-mental" data-tab="mental" role="tab" aria-selected="false">
-            <span>🧘</span>
-            <span>Khảo Sát Tâm Lý</span>
-          </button>
-          <button class="nav-tab-btn" id="tab-btn-tm" data-tab="tm" role="tab" aria-selected="false">
-            <span>📷</span>
-            <span>AI Camera (Teachable Machine)</span>
-          </button>
-        </nav>
+  <!-- AUTH MODAL (Login / Register / Forgot Password) -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <div>
+          <h3 id="authModalTitle">Sign In to LifeCare</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">Your Life, Your Balance</p>
+        </div>
+        <button class="modal-close" id="authModalClose" style="display: none;">✕</button>
       </div>
 
-      <div class="nav-actions">
-        <!-- Notification Center Bell -->
-        <div class="notification-wrapper" id="notification-wrapper">
-          <button class="btn-icon btn-notification" id="btn-notification-bell" title="Thông báo lịch trình cần làm">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span class="pulse-badge" id="notification-badge" style="display: none;">0</span>
-          </button>
-
-          <div class="notification-dropdown" id="notification-dropdown">
-            <div class="notif-dropdown-header">
-              <span>🔔 Thông Báo Lịch Trình</span>
-              <span style="font-size: 0.72rem; color: var(--text-muted);">Cần hoàn thành</span>
-            </div>
-            <div class="notification-list" id="notification-list"></div>
-          </div>
+      <!-- Login Form -->
+      <form id="loginForm">
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="loginEmail" class="form-control" placeholder="alex.balance@lifecare.app" required />
         </div>
-
-        <!-- PWA Install Button (Appears if installable) -->
-        <button class="btn btn-secondary" id="btn-pwa-install" style="display: none;" title="Cài đặt ứng dụng">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-          <span>Cài Đặt App</span>
-        </button>
-
-        <!-- AI Assistant Toggle Button -->
-        <button class="btn btn-ai-toggle" id="btn-toggle-ai" title="Mở Trợ lý AI Lập Kế Hoạch">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
-          </svg>
-          <span>Trợ Lý AI</span>
-        </button>
-
-        <!-- Backup Export Button -->
-        <button class="btn btn-secondary" id="btn-export-plans" title="Sao lưu dữ liệu JSON">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          <span>Sao lưu</span>
-        </button>
-
-        <!-- Theme Switcher Button -->
-        <button class="btn-icon" id="btn-toggle-theme" title="Đổi giao diện Sáng/Tối">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-          </svg>
-        </button>
-
-        <!-- Add Plan Button -->
-        <button class="btn btn-primary" id="btn-new-plan">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          <span>Thêm Kế Hoạch</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- Main Content Area -->
-    <div class="main-wrapper">
-      <main class="content-area">
-        <!-- Urgent Schedule Alert Banner -->
-        <div id="urgent-schedule-banner" class="urgent-banner banner-warning" style="display: none;"></div>
-
-        <!-- TAB 1: PLANS MANAGEMENT -->
-        <div id="plans-tab-content">
-          <!-- Dashboard Statistics -->
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-info">
-                <div class="stat-label">Tổng Kế Hoạch</div>
-                <div class="stat-value" id="stat-total">0</div>
-              </div>
-              <div class="stat-badge" style="color: var(--primary); background: var(--primary-light);">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              </div>
-            </div>
-
-            <div class="stat-card">
-              <div class="stat-info">
-                <div class="stat-label">Đang Thực Hiện</div>
-                <div class="stat-value" id="stat-in-progress">0</div>
-              </div>
-              <div class="stat-badge" style="color: var(--status-in_progress); background: rgba(59, 130, 246, 0.15);">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              </div>
-            </div>
-
-            <div class="stat-card">
-              <div class="stat-info">
-                <div class="stat-label">Đã Hoàn Thành</div>
-                <div class="stat-value" id="stat-completed">0</div>
-              </div>
-              <div class="stat-badge" style="color: var(--status-completed); background: rgba(16, 185, 129, 0.15);">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-              </div>
-            </div>
-
-            <div class="stat-card">
-              <div class="stat-info">
-                <div class="stat-label">Tiến Độ Chung</div>
-                <div class="stat-value" id="stat-rate">0%</div>
-              </div>
-              <div class="stat-badge" style="color: #ec4899; background: rgba(236, 72, 153, 0.15);">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-              </div>
-            </div>
-          </div>
-
-          <!-- Controls Toolbar -->
-          <div class="controls-bar">
-            <div class="search-filter-group">
-              <div class="search-box">
-                <span class="search-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                </span>
-                <input type="text" id="search-input" class="search-input" placeholder="Tìm kiếm kế hoạch, ghi chú, nhãn..." />
-              </div>
-
-              <select id="filter-category" class="select-filter">
-                <option value="all">📂 Tất cả danh mục</option>
-                <option value="Công việc">💼 Công việc</option>
-                <option value="Học tập">📚 Học tập</option>
-                <option value="Sức khỏe">💪 Sức khỏe</option>
-                <option value="Tài chính">💰 Tài chính</option>
-                <option value="Cá nhân">🌱 Cá nhân</option>
-              </select>
-
-              <select id="filter-priority" class="select-filter">
-                <option value="all">🎯 Mức ưu tiên</option>
-                <option value="urgent">🔥 Khẩn cấp</option>
-                <option value="high">⚡ Cao</option>
-                <option value="medium">🔹 Trung bình</option>
-                <option value="low">☕ Thấp</option>
-              </select>
-            </div>
-
-            <div class="view-actions-group">
-              <div class="view-switcher">
-                <button class="view-btn active" id="view-kanban-btn" title="Chế độ Bảng Kanban">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>
-                  <span>Bảng</span>
-                </button>
-                <button class="view-btn" id="view-list-btn" title="Chế độ Danh sách">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                  <span>Danh sách</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Kanban Board View -->
-          <div id="kanban-view" class="kanban-board">
-            <!-- Column 1: Todo -->
-            <div class="kanban-column">
-              <div class="column-header">
-                <div class="column-title-group">
-                  <span class="status-dot todo"></span>
-                  <span>Cần làm</span>
-                </div>
-                <span class="column-count" id="count-todo">0</span>
-              </div>
-              <div class="column-body" id="column-todo-items"></div>
-            </div>
-
-            <!-- Column 2: In Progress -->
-            <div class="kanban-column">
-              <div class="column-header">
-                <div class="column-title-group">
-                  <span class="status-dot in_progress"></span>
-                  <span>Đang thực hiện</span>
-                </div>
-                <span class="column-count" id="count-in_progress">0</span>
-              </div>
-              <div class="column-body" id="column-in_progress-items"></div>
-            </div>
-
-            <!-- Column 3: Completed -->
-            <div class="kanban-column">
-              <div class="column-header">
-                <div class="column-title-group">
-                  <span class="status-dot completed"></span>
-                  <span>Hoàn thành</span>
-                </div>
-                <span class="column-count" id="count-completed">0</span>
-              </div>
-              <div class="column-body" id="column-completed-items"></div>
-            </div>
-          </div>
-
-          <!-- List View (Hidden by default) -->
-          <div id="list-view" class="list-view-container" style="display: none;"></div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="loginPassword" class="form-control" placeholder="••••••••" required />
         </div>
-
-        <!-- TAB 2: MENTAL HEALTH SURVEY & WELLBEING (Hidden by default) -->
-        <div id="mental-health-section" style="display: none;"></div>
-
-        <!-- TAB 3: TEACHABLE MACHINE AI CAMERA (Hidden by default) -->
-        <div id="teachable-machine-section" style="display: none;"></div>
-      </main>
-
-      <!-- AI Assistant Drawer -->
-      <aside id="ai-drawer" class="ai-drawer">
-        <div class="ai-header">
-          <div class="ai-header-title">
-            <div class="brand-icon" style="width: 28px; height: 28px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
-            </div>
-            <span>PlanBot AI</span>
-            <span class="ai-header-badge">Trực tuyến</span>
-          </div>
-          <div style="display: flex; align-items: center; gap: 0.35rem;">
-            <button class="card-action-btn" id="btn-ai-settings" title="Cài đặt mô hình AI">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </button>
-            <button class="card-action-btn" id="btn-close-ai" title="Đóng cửa sổ chat">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; font-size: 0.82rem;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-muted);">
+            <input type="checkbox" id="rememberMe" checked /> Remember me
+          </label>
+          <a href="#" id="showForgotLink" style="color: var(--primary); text-decoration: none; font-weight: 600;">Forgot password?</a>
         </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Sign In</button>
+        <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
+          Don't have an account? <a href="#" id="showRegisterLink" style="color: var(--primary); font-weight: 700; text-decoration: none;">Create one free</a>
+        </p>
+      </form>
 
-        <!-- Messages Container -->
-        <div class="ai-messages" id="ai-messages"></div>
-
-        <!-- Quick Prompts Chips -->
-        <div class="ai-quick-prompts" id="ai-quick-prompts"></div>
-
-        <!-- Chat Input Form -->
-        <div class="ai-input-area">
-          <div class="chat-input-wrapper">
-            <input type="text" id="ai-input" class="chat-input" placeholder="Hỏi AI hoặc yêu cầu lập kế hoạch..." autocomplete="off" />
-            <button class="btn-send" id="ai-send-btn" title="Gửi tin nhắn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-            </button>
-          </div>
+      <!-- Register Form -->
+      <form id="registerForm" style="display: none;">
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="regFullName" class="form-control" placeholder="e.g. Jordan Smith" required />
         </div>
-      </aside>
-    </div>
-
-    <!-- Modal: Add / Edit Plan -->
-    <div class="modal-overlay" id="modal-plan-form">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3 class="modal-title" id="modal-plan-title">Tạo Kế Hoạch Mới</h3>
-          <button class="card-action-btn" id="btn-close-plan-modal">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="regEmail" class="form-control" placeholder="jordan@example.com" required />
         </div>
-        <form id="plan-form">
-          <div class="modal-body">
-            <div class="form-group">
-              <label class="form-label" for="plan-input-title">Tiêu đề kế hoạch *</label>
-              <input type="text" id="plan-input-title" class="form-control" placeholder="Ví dụ: Hoàn thành đề cương nghiên cứu khoa học" required />
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label" for="plan-input-category">Danh mục</label>
-                <select id="plan-input-category" class="form-control">
-                  <option value="Công việc">💼 Công việc</option>
-                  <option value="Học tập">📚 Học tập</option>
-                  <option value="Sức khỏe">💪 Sức khỏe</option>
-                  <option value="Tài chính">💰 Tài chính</option>
-                  <option value="Cá nhân">🌱 Cá nhân</option>
-                </select>
-              </div>
-
-              <div class="form-group">
-                <label class="form-label" for="plan-input-priority">Mức ưu tiên</label>
-                <select id="plan-input-priority" class="form-control">
-                  <option value="urgent">🔥 Khẩn cấp</option>
-                  <option value="high">⚡ Cao</option>
-                  <option value="medium" selected>🔹 Trung bình</option>
-                  <option value="low">☕ Thấp</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label" for="plan-input-start">Ngày bắt đầu</label>
-                <input type="date" id="plan-input-start" class="form-control" />
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="plan-input-due">Hạn chót (Deadline)</label>
-                <input type="date" id="plan-input-due" class="form-control" />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="plan-input-status">Trạng thái hiện tại</label>
-              <select id="plan-input-status" class="form-control">
-                <option value="todo">📌 Cần làm (Chưa bắt đầu)</option>
-                <option value="in_progress">⚡ Đang thực hiện</option>
-                <option value="completed">✅ Đã hoàn thành</option>
-              </select>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="plan-input-desc">Mô tả chi tiết / Ghi chú</label>
-              <textarea id="plan-input-desc" class="form-control" placeholder="Chi tiết mục tiêu, lưu ý, người phối hợp..."></textarea>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label">Các bước thực hiện (Subtasks / Checklist)</label>
-              <div id="subtasks-builder-list" class="subtasks-builder"></div>
-              <button type="button" class="btn-add-subtask" id="btn-add-subtask-modal">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                <span>Thêm bước con</span>
-              </button>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="plan-input-tags">Nhãn (Tags - Phân cách bằng dấu phẩy)</label>
-              <input type="text" id="plan-input-tags" class="form-control" placeholder="Ví dụ: Q4, Báo cáo, Khẩn cấp" />
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" id="btn-cancel-plan">Huỷ</button>
-            <button type="submit" class="btn btn-primary" id="btn-save-plan">Lưu Kế Hoạch</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Modal: Delete Confirmation -->
-    <div class="modal-overlay" id="modal-delete-confirm">
-      <div class="modal-content" style="max-width: 440px;">
-        <div class="modal-header">
-          <h3 class="modal-title" style="color: #ef4444; display: flex; align-items: center; gap: 0.5rem;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            Xác Nhận Xoá
-          </h3>
-          <button class="card-action-btn" id="btn-close-delete-modal">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="regPassword" class="form-control" placeholder="At least 6 characters" minlength="6" required />
         </div>
-        <div class="modal-body">
-          <p>Bạn có chắc chắn muốn xoá kế hoạch này không?</p>
-          <p style="font-weight: 600; color: var(--text-primary); margin-top: 0.5rem;" id="delete-plan-title">"..."</p>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Bạn vẫn có thể nhấn nút Hoàn tác ngay sau khi xoá nếu lỡ bấm nhầm.</p>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" id="btn-cancel-delete">Giữ lại</button>
-          <button type="button" class="btn btn-danger" id="btn-confirm-delete">Xoá Vĩnh Viễn</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal: AI Settings -->
-    <div class="modal-overlay" id="modal-ai-settings">
-      <div class="modal-content" style="max-width: 500px;">
-        <div class="modal-header">
-          <h3 class="modal-title">⚙️ Cài Đặt Trợ Lý AI</h3>
-          <button class="card-action-btn" id="btn-close-ai-settings">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
+        <div class="form-row">
           <div class="form-group">
-            <label class="form-label" for="setting-ai-provider">Mô hình AI sử dụng</label>
-            <select id="setting-ai-provider" class="form-control">
-              <option value="builtin">🤖 Bộ não AI Tích Hợp (Mặc định - Chạy mượt tức thì)</option>
-              <option value="gemini">✨ Google Gemini 2.5 Flash API (Cần API Key)</option>
+            <label>Date of Birth (Optional)</label>
+            <input type="date" id="regDob" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label>Gender (Optional)</label>
+            <select id="regGender" class="form-control">
+              <option value="">Prefer not to say</option>
+              <option value="Female">Female</option>
+              <option value="Male">Male</option>
+              <option value="Non-binary">Non-binary</option>
+              <option value="Other">Other</option>
             </select>
           </div>
+        </div>
+        <div class="form-group">
+          <label>Personal Wellness Goals</label>
+          <input type="text" id="regGoals" class="form-control" placeholder="e.g. Sleep 8h, daily walk, reduce stress" />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Create My Account</button>
+        <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
+          Already have an account? <a href="#" id="showLoginLink" style="color: var(--primary); font-weight: 700; text-decoration: none;">Sign in</a>
+        </p>
+      </form>
 
-          <div class="form-group">
-            <label class="form-label" for="setting-gemini-key">Google Gemini API Key (Không bắt buộc)</label>
-            <input type="password" id="setting-gemini-key" class="form-control" placeholder="Nhập mã AIzaSy... nếu muốn dùng Gemini trực tiếp" />
-            <small style="color: var(--text-muted); font-size: 0.775rem; margin-top: 0.25rem;">
-              * Mặc định hệ thống đã có AI thông minh tích hợp sẵn không cần key. Nếu muốn kết nối với model lớn nhất của Google, bạn có thể lấy key miễn phí tại <a href="https://aistudio.google.com" target="_blank" style="color: var(--primary);">Google AI Studio</a>.
-            </small>
-          </div>
+      <!-- Forgot Password Form -->
+      <form id="forgotForm" style="display: none;">
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
+          Enter your registered email address and we'll send you verification steps to reset your password.
+        </p>
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="forgotEmail" class="form-control" placeholder="alex.balance@lifecare.app" required />
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-primary" id="btn-save-ai-settings">Lưu Cấu Hình</button>
-        </div>
-      </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Send Instructions</button>
+        <p style="text-align: center; margin-top: 16px; font-size: 0.85rem;">
+          <a href="#" id="backToLoginLink" style="color: var(--primary); text-decoration: none; font-weight: 600;">← Back to sign in</a>
+        </p>
+      </form>
     </div>
-
-    <!-- Toast Notifications Container -->
-    <div id="toast-container" class="toast-container"></div>
   </div>
 
-  <!-- TensorFlow.js & Teachable Machine Library -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  <!-- MAIN APP LAYOUT -->
+  <div class="app-layout" id="mainAppLayout">
+    <!-- SIDEBAR NAVIGATION -->
+    <aside class="sidebar" id="appSidebar">
+      <div class="sidebar-header">
+        <a href="#" class="brand-badge" id="brandLogo">
+          <div class="brand-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title">LifeCare</div>
+            <div class="brand-tagline">Your Life, Your Balance</div>
+          </div>
+        </a>
+      </div>
 
-  <!-- Application Modules -->
-  <script src="/js/icons.js"></script>
-  <script src="/js/notifications.js"></script>
-  <script src="/js/mental-health.js"></script>
-  <script src="/js/teachable-machine.js"></script>
-  <script src="/js/ai-assistant.js"></script>
+      <!-- Navigation Links -->
+      <nav class="sidebar-nav">
+        <button class="nav-link active" data-view="dashboard">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+          <span>Dashboard</span>
+        </button>
+
+        <button class="nav-link" data-view="planner">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>My Planner</span>
+        </button>
+
+        <button class="nav-link" data-view="physical">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <span>Physical Health</span>
+        </button>
+
+        <button class="nav-link" data-view="mental">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+          <span>Mental Wellness</span>
+        </button>
+
+        <button class="nav-link" data-view="timeline">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Health Timeline</span>
+        </button>
+
+        <button class="nav-link" data-view="statistics">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span>Statistics & Reports</span>
+        </button>
+
+        <button class="nav-link" data-view="settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings & Privacy</span>
+        </button>
+      </nav>
+
+      <!-- Sidebar User Profile Footer -->
+      <div class="sidebar-footer">
+        <div class="user-mini-card">
+          <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=100&q=80" alt="Avatar" class="user-avatar" id="sidebarAvatar" />
+          <div class="user-info">
+            <div class="name" id="sidebarUserName">Alex Rivera</div>
+            <div class="email" id="sidebarUserEmail">alex.balance@lifecare.app</div>
+          </div>
+        </div>
+        <button class="btn-icon" id="sidebarLogoutBtn" title="Logout">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- MAIN WRAPPER -->
+    <div class="main-wrapper">
+      <!-- TOP HEADER -->
+      <header class="top-header">
+        <div class="header-left">
+          <button class="mobile-toggle" id="mobileMenuBtn">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div class="page-title" id="pageTitle">Dashboard</div>
+        </div>
+
+        <div class="header-right">
+          <!-- Install PWA Button -->
+          <button class="btn btn-secondary" id="pwaInstallBtn" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            <span>Install App</span>
+          </button>
+
+          <!-- AI Assistant Launcher -->
+          <button class="btn btn-accent" id="openAiDrawerBtn" title="Chat with AI Wellness Assistant">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+            <span>AI Wellness Assistant</span>
+          </button>
+
+          <!-- Notification Bell -->
+          <button class="btn-icon" id="notifBellBtn" title="Notifications">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="badge-dot" id="notifBadge" style="display: none;"></span>
+          </button>
+
+          <!-- Dark/Light Theme Toggle -->
+          <button class="btn-icon" id="themeToggleBtn" title="Toggle Theme">
+            <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg id="themeIconMoon" style="display: none;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- PAGE CONTENT SECTIONS -->
+      <main class="page-content">
+        <!-- ============================================== -->
+        <!-- VIEW 1: DASHBOARD -->
+        <!-- ============================================== -->
+        <section class="view-section active" id="view-dashboard">
+          <!-- Welcome Hero Section -->
+          <div class="welcome-hero">
+            <div>
+              <h2 class="welcome-greeting" id="welcomeGreeting">Good afternoon, Alex! ☀️</h2>
+              <p class="welcome-sub" id="welcomeMotivational">"Balance is not something you find, it's something you create." Today is <strong id="currentDateDisplay">Today</strong>.</p>
+            </div>
+            <div class="hero-quick-cta">
+              <button class="btn btn-primary" id="btnQuickCheckin">
+                <span>⚡ 30s Daily Check-in</span>
+              </button>
+              <button class="btn btn-secondary" id="btnDashNewTask">
+                <span>+ New Task</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Feature 1: Proactive Daily Check-in Banner -->
+          <div class="proactive-checkin-banner" id="proactiveBanner">
+            <div class="proactive-text">
+              <span class="pulse-icon">🌿</span>
+              <div>
+                <h4>Daily Mind & Body Check-in</h4>
+                <p>Did you sleep well last night? How are you feeling physically and emotionally today?</p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" id="startRapidCheckinBtn">Start 30s Check-in</button>
+              <button class="btn btn-secondary" id="dismissProactiveBtn">Later</button>
+            </div>
+          </div>
+
+          <!-- Feature 4: Smart Schedule Recommendation Card -->
+          <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary);" id="scheduleRecCard">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <div>
+                <h4 style="font-size: 1.05rem; font-weight: 800; color: var(--text-heading); display: flex; align-items: center; gap: 8px;">
+                  <span>💡 Smart Schedule Balance Recommendation</span>
+                </h4>
+                <p id="scheduleRecSummary" style="font-size: 0.88rem; color: var(--text-muted); margin-top: 4px;">Analyzing your schedule balance...</p>
+              </div>
+              <button class="btn btn-secondary" id="btnApplyScheduleRec" style="font-size: 0.8rem; padding: 6px 12px;">Review Advice</button>
+            </div>
+          </div>
+
+          <!-- Daily Overview Metrics -->
+          <div class="dashboard-grid" style="margin-bottom: 24px;">
+            <div class="col-3">
+              <div class="metric-card">
+                <div class="metric-icon-box blue">✓</div>
+                <div class="metric-info">
+                  <div class="label">Completed Tasks</div>
+                  <div class="value" id="dashCompletedTasks">0</div>
+                  <div class="subtext" id="dashCompletionRate">0% of today's plan</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-3">
+              <div class="metric-card">
+                <div class="metric-icon-box orange">⏳</div>
+                <div class="metric-info">
+                  <div class="label">Remaining Tasks</div>
+                  <div class="value" id="dashRemainingTasks">0</div>
+                  <div class="subtext">Pending for today</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-3">
+              <div class="metric-card">
+                <div class="metric-icon-box green">💤</div>
+                <div class="metric-info">
+                  <div class="label">Sleep Recorded</div>
+                  <div class="value" id="dashSleepDuration">--</div>
+                  <div class="subtext" id="dashSleepQuality">Quality: Pending</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-3">
+              <div class="metric-card">
+                <div class="metric-icon-box purple">✨</div>
+                <div class="metric-info">
+                  <div class="label">Emotional State</div>
+                  <div class="value" id="dashMoodValue">Balanced</div>
+                  <div class="subtext" id="dashMoodSub">Weekly mood logged</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Dashboard Split: Today's Schedule & Health Overview -->
+          <div class="dashboard-grid">
+            <div class="col-8">
+              <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                  <h3 class="card-title" style="margin-bottom: 0;">Today's Schedule & Tasks</h3>
+                  <button class="btn btn-secondary" id="btnGoToPlanner" style="font-size: 0.82rem; padding: 6px 12px;">Full Calendar →</button>
+                </div>
+                <div id="dashTodayTasksList">
+                  <!-- Injected via JS -->
+                </div>
+              </div>
+            </div>
+
+            <div class="col-4">
+              <!-- Health & Mood Quick Overview Card -->
+              <div class="card" style="margin-bottom: 20px;">
+                <h3 class="card-title">Health Overview</h3>
+                <div id="dashHealthOverviewContent" style="font-size: 0.9rem;">
+                  <!-- Injected via JS -->
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 16px;">
+                  <button class="btn btn-primary" id="btnDashPhysCheckin" style="flex: 1; font-size: 0.82rem;">Physical Log</button>
+                  <button class="btn btn-secondary" id="btnDashMoodCheckin" style="flex: 1; font-size: 0.82rem;">Mood Log</button>
+                </div>
+              </div>
+
+              <!-- Quick Supportive Message Card -->
+              <div class="card">
+                <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin-bottom: 8px;">Mindful Thought</h4>
+                <p id="dashSupportiveMsg" style="font-size: 0.86rem; color: var(--text-muted); line-height: 1.6;">
+                  "Take a slow breath. Balance is about doing the right things at a sustainable pace."
+                </p>
+                <div style="margin-top: 14px; text-align: right;">
+                  <button class="btn btn-accent" id="btnDashWeeklyReport" style="font-size: 0.8rem; padding: 6px 12px;">View Weekly Report →</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW 2: SMART PLANNER – SCHEDULE MANAGEMENT -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-planner">
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="calendar-controls">
+              <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+                <button class="btn btn-primary" id="btnOpenNewTaskModal">+ Create Task / Event</button>
+                <div class="calendar-view-tabs">
+                  <button class="view-tab-btn active" data-cal-view="month">Month</button>
+                  <button class="view-tab-btn" data-cal-view="week">Week</button>
+                  <button class="view-tab-btn" data-cal-view="day">Day</button>
+                </div>
+              </div>
+
+              <!-- Search & Filters -->
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="taskSearchInput" class="form-control" placeholder="Search tasks..." style="width: 180px; padding: 6px 12px;" />
+                <select id="taskCategoryFilter" class="form-control" style="width: 130px; padding: 6px 10px;">
+                  <option value="all">All Categories</option>
+                  <option value="Study">Study</option>
+                  <option value="Work">Work</option>
+                  <option value="Exercise">Exercise</option>
+                  <option value="Personal">Personal</option>
+                  <option value="Rest">Rest</option>
+                  <option value="Other">Other</option>
+                </select>
+                <select id="taskPriorityFilter" class="form-control" style="width: 130px; padding: 6px 10px;">
+                  <option value="all">All Priorities</option>
+                  <option value="high">High Priority</option>
+                  <option value="medium">Medium Priority</option>
+                  <option value="low">Low Priority</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Month / Week / Day Container -->
+            <div id="calendarDisplayArea">
+              <!-- Injected dynamically -->
+            </div>
+          </div>
+
+          <!-- All Tasks Management List -->
+          <div class="card">
+            <h3 class="card-title">Tasks & Schedule Management</h3>
+            <div id="allTasksList">
+              <!-- Injected via JS -->
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW 3: PHYSICAL HEALTH CHECK-IN -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-physical">
+          <div class="dashboard-grid">
+            <div class="col-7">
+              <div class="card">
+                <h3 class="card-title">Daily Physical Health Check-in</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">
+                  Track your physical vitality, sleep, exercise, and hydration. You can skip questions you do not wish to answer.
+                </p>
+
+                <form id="physicalCheckinForm">
+                  <div class="form-group">
+                    <label>Check-in Date</label>
+                    <input type="date" id="physDate" class="form-control" required />
+                  </div>
+
+                  <div class="form-group">
+                    <label>1. How are you feeling physically today?</label>
+                    <select id="physCondition" class="form-control">
+                      <option value="Very Good">Very good</option>
+                      <option value="Good" selected>Good</option>
+                      <option value="Normal">Normal</option>
+                      <option value="Tired">Tired</option>
+                      <option value="Unwell">Unwell</option>
+                    </select>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>2. Sleep duration (hours)</label>
+                      <input type="number" step="0.5" min="0" max="24" id="physSleepHours" class="form-control" placeholder="e.g. 7.5" />
+                    </div>
+                    <div class="form-group">
+                      <label>3. Sleep quality</label>
+                      <select id="physSleepQuality" class="form-control">
+                        <option value="Very Good">Very good</option>
+                        <option value="Good" selected>Good</option>
+                        <option value="Average">Average</option>
+                        <option value="Poor">Poor</option>
+                        <option value="Very Poor">Very poor</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>4. Did you exercise today?</label>
+                      <select id="physExercise" class="form-control">
+                        <option value="Yes">Yes, exercised</option>
+                        <option value="No">No exercise</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>5. Water intake (Liters)</label>
+                      <input type="number" step="0.1" min="0" max="10" id="physWater" class="form-control" placeholder="e.g. 2.0" />
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label>6. Energy Level (1 to 5)</label>
+                    <div class="rating-group" id="energyRatingGroup">
+                      <button type="button" class="rating-btn" data-val="1">1</button>
+                      <button type="button" class="rating-btn" data-val="2">2</button>
+                      <button type="button" class="rating-btn" data-val="3">3</button>
+                      <button type="button" class="rating-btn active" data-val="4">4</button>
+                      <button type="button" class="rating-btn" data-val="5">5</button>
+                    </div>
+                    <input type="hidden" id="physEnergyLevel" value="4" />
+                  </div>
+
+                  <div class="form-group">
+                    <label>7. Any physical discomfort or symptoms?</label>
+                    <input type="text" id="physDiscomfort" class="form-control" placeholder="e.g. slight shoulder tension, headache, none" />
+                  </div>
+
+                  <div class="form-group">
+                    <label>Personal Health Notes (Optional)</label>
+                    <textarea id="physNotes" class="form-control" placeholder="Notes about nutrition, posture, or physical habits..."></textarea>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary" style="width: 100%;">Save Daily Health Check-in</button>
+                </form>
+
+                <!-- Medical Disclaimer Requirement -->
+                <div class="medical-alert-box">
+                  <span>ℹ️</span>
+                  <div>
+                    <strong>Medical Disclaimer:</strong> LifeCare is an organizational and self-reflection companion. It does not provide medical diagnoses or replace consultations with licensed healthcare providers. If you experience distressing or severe symptoms, please seek professional medical care promptly.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-5">
+              <div class="card">
+                <h3 class="card-title">Recent Health Check-in Records</h3>
+                <div id="physicalHistoryList">
+                  <!-- Injected via JS -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW 4: MENTAL HEALTH & EMOTIONAL WELLNESS -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-mental">
+          <div class="dashboard-grid">
+            <div class="col-7">
+              <div class="card">
+                <h3 class="card-title">Daily Mood & Mental Wellness Reflection</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 18px;">
+                  A safe, private space to acknowledge your emotions. Emotions are natural signals—not diagnoses.
+                </p>
+
+                <form id="moodCheckinForm">
+                  <div class="form-group">
+                    <label>How are you feeling today? Select an emotion:</label>
+                    <div class="mood-picker-grid" id="moodPickerGrid">
+                      <div class="mood-option-btn active" data-mood="Happy" data-emoji="😊">
+                        <span class="mood-emoji">😊</span>
+                        <span class="mood-name">Happy</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Excited" data-emoji="✨">
+                        <span class="mood-emoji">✨</span>
+                        <span class="mood-name">Excited</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Relaxed" data-emoji="😌">
+                        <span class="mood-emoji">😌</span>
+                        <span class="mood-name">Relaxed</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Normal" data-emoji="🙂">
+                        <span class="mood-emoji">🙂</span>
+                        <span class="mood-name">Normal</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Tired" data-emoji="🥱">
+                        <span class="mood-emoji">🥱</span>
+                        <span class="mood-name">Tired</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Stressed" data-emoji="😣">
+                        <span class="mood-emoji">😣</span>
+                        <span class="mood-name">Stressed</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Sad" data-emoji="😢">
+                        <span class="mood-emoji">😢</span>
+                        <span class="mood-name">Sad</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Anxious" data-emoji="😰">
+                        <span class="mood-emoji">😰</span>
+                        <span class="mood-name">Anxious</span>
+                      </div>
+                      <div class="mood-option-btn" data-mood="Overwhelmed" data-emoji="🌪️">
+                        <span class="mood-emoji">🌪️</span>
+                        <span class="mood-name">Overwhelmed</span>
+                      </div>
+                    </div>
+                    <input type="hidden" id="selectedMood" value="Happy" />
+                    <input type="hidden" id="selectedEmoji" value="😊" />
+                  </div>
+
+                  <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin: 24px 0 12px 0;">Mental Wellness Questionnaire (Scale 1–5)</h4>
+                  <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;">1 = Never &nbsp;|&nbsp; 2 = Rarely &nbsp;|&nbsp; 3 = Sometimes &nbsp;|&nbsp; 4 = Often &nbsp;|&nbsp; 5 = Almost always</p>
+
+                  <div class="form-group">
+                    <label>1. Have you felt stressed or under pressure recently?</label>
+                    <select id="surveyStress" class="form-control">
+                      <option value="1">1 - Never</option>
+                      <option value="2" selected>2 - Rarely</option>
+                      <option value="3">3 - Sometimes</option>
+                      <option value="4">4 - Often</option>
+                      <option value="5">5 - Almost always</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label>2. Have you experienced anxiety or excessive worry?</label>
+                    <select id="surveyAnxiety" class="form-control">
+                      <option value="1" selected>1 - Never</option>
+                      <option value="2">2 - Rarely</option>
+                      <option value="3">3 - Sometimes</option>
+                      <option value="4">4 - Often</option>
+                      <option value="5">5 - Almost always</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label>3. Have you felt motivated to complete your daily activities?</label>
+                    <select id="surveyMotivation" class="form-control">
+                      <option value="1">1 - Never</option>
+                      <option value="2">2 - Rarely</option>
+                      <option value="3">3 - Sometimes</option>
+                      <option value="4" selected>4 - Often</option>
+                      <option value="5">5 - Almost always</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label>4. Have you felt connected to friends or family?</label>
+                    <select id="surveyConnected" class="form-control">
+                      <option value="1">1 - Never</option>
+                      <option value="2">2 - Rarely</option>
+                      <option value="3">3 - Sometimes</option>
+                      <option value="4" selected>4 - Often</option>
+                      <option value="5">5 - Almost always</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label>5. Have you had enough time to relax and unwind?</label>
+                    <select id="surveyRelaxed" class="form-control">
+                      <option value="1">1 - Never</option>
+                      <option value="2">2 - Rarely</option>
+                      <option value="3">3 - Sometimes</option>
+                      <option value="4" selected>4 - Often</option>
+                      <option value="5">5 - Almost always</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label>Personal Reflection Notes (Optional)</label>
+                    <textarea id="moodNotes" class="form-control" placeholder="Is there anything bothering you or something you feel grateful for today?"></textarea>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary" style="width: 100%;">Record Emotional Reflection</button>
+                </form>
+
+                <!-- Psychological Disclaimer Requirement -->
+                <div class="wellness-support-box">
+                  <strong>💙 Ethical Mental Wellness Boundary:</strong>
+                  This feature is designed for general emotional self-reflection and personal wellness support. We do not use numerical scores to diagnose mental health disorders. If you are experiencing intense distress or thoughts of self-harm, please reach out to emergency services (e.g. 988 Lifeline) or a licensed mental health professional immediately.
+                </div>
+              </div>
+            </div>
+
+            <div class="col-5">
+              <div class="card" style="margin-bottom: 20px;">
+                <h3 class="card-title">Supportive Message for You</h3>
+                <div id="dynamicSupportBox" style="font-size: 0.95rem; line-height: 1.6; color: var(--text-heading); background: var(--primary-light); padding: 18px; border-radius: var(--radius-md);">
+                  "Remember: It is okay to take pause. Productivity without inner calm is unsustainable."
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 class="card-title">Recent Mood History</h3>
+                <div id="moodHistoryList">
+                  <!-- Injected via JS -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW 5: PERSONAL HEALTH TIMELINE (Feature #3) -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-timeline">
+          <div class="card" style="margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+              <div>
+                <h3 class="card-title" style="margin-bottom: 4px;">Personal Health Timeline</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">
+                  Reflect on days when you felt energized, stressed, well-rested, and accomplished.
+                </p>
+              </div>
+              <div class="calendar-view-tabs">
+                <button class="view-tab-btn active" data-timeline-range="30days">Last 30 Days</button>
+                <button class="view-tab-btn" data-timeline-range="7days">Last 7 Days</button>
+                <button class="view-tab-btn" data-timeline-range="year">Full Year</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="timelineContainer" class="timeline-stream">
+            <!-- Injected via JS -->
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW 6: STATISTICS & PERSONAL REPORTS -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-statistics">
+          <!-- Feature 5: Generated Weekly Report Showcase -->
+          <div class="welcome-hero" style="margin-bottom: 24px; background: linear-gradient(135deg, #EEF4FD 0%, #F0F9F4 100%);">
+            <div>
+              <h3 style="font-size: 1.3rem; font-weight: 800; color: var(--text-heading); margin-bottom: 6px;">Your Automated Weekly Personal Report 📊</h3>
+              <p id="weeklyReportSummaryText" style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.6;">
+                Loading your weekly progress overview...
+              </p>
+            </div>
+            <button class="btn btn-primary" id="btnRefreshWeeklyReport">Regenerate Report</button>
+          </div>
+
+          <div class="dashboard-grid" style="margin-bottom: 24px;">
+            <div class="col-6">
+              <div class="card">
+                <h3 class="card-title">Task Productivity by Category</h3>
+                <div style="height: 260px; position: relative;">
+                  <canvas id="categoryChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-6">
+              <div class="card">
+                <h3 class="card-title">Weekly Mood Distribution</h3>
+                <div style="height: 260px; position: relative;">
+                  <canvas id="moodChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-6">
+              <div class="card">
+                <h3 class="card-title">Sleep Duration Trends (Hours)</h3>
+                <div style="height: 260px; position: relative;">
+                  <canvas id="sleepChart"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-6">
+              <div class="card">
+                <h3 class="card-title">Stress & Motivation Trend</h3>
+                <div style="height: 260px; position: relative;">
+                  <canvas id="stressChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW 7: SETTINGS & PRIVACY -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-settings">
+          <div class="dashboard-grid">
+            <div class="col-6">
+              <!-- Edit Profile -->
+              <div class="card" style="margin-bottom: 24px;">
+                <h3 class="card-title">User Profile Management</h3>
+                <form id="profileForm">
+                  <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="profFullName" class="form-control" required />
+                  </div>
+                  <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" id="profEmail" class="form-control" disabled style="opacity: 0.7; cursor: not-allowed;" />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Date of Birth</label>
+                      <input type="date" id="profDob" class="form-control" />
+                    </div>
+                    <div class="form-group">
+                      <label>Gender</label>
+                      <select id="profGender" class="form-control">
+                        <option value="">Prefer not to say</option>
+                        <option value="Female">Female</option>
+                        <option value="Male">Male</option>
+                        <option value="Non-binary / Other">Non-binary / Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Personal Wellness Goals</label>
+                    <textarea id="profGoals" class="form-control" placeholder="Describe your health and work balance priorities..."></textarea>
+                  </div>
+                  <button type="submit" class="btn btn-primary">Update Profile</button>
+                </form>
+              </div>
+
+              <!-- Change Password -->
+              <div class="card">
+                <h3 class="card-title">Change Password</h3>
+                <form id="changePasswordForm">
+                  <div class="form-group">
+                    <label>Current Password</label>
+                    <input type="password" id="curPassword" class="form-control" required />
+                  </div>
+                  <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" id="newPassword" class="form-control" minlength="6" required />
+                  </div>
+                  <button type="submit" class="btn btn-secondary">Update Password</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="col-6">
+              <!-- Notification Preferences -->
+              <div class="card" style="margin-bottom: 24px;">
+                <h3 class="card-title">Notification & Habit Reminders</h3>
+                <form id="settingsForm">
+                  <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
+                      <input type="checkbox" id="setRemindWater" checked /> Hydration reminders (Drink water regularly)
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
+                      <input type="checkbox" id="setRemindBreak" checked /> Screen & movement breaks
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
+                      <input type="checkbox" id="setRemindHealth" checked /> Daily physical check-in reminder
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
+                      <input type="checkbox" id="setRemindMood" checked /> Daily mood reflection prompt
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
+                      <input type="checkbox" id="setRemindTasks" checked /> Upcoming task & schedule notifications
+                    </label>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Quiet Hours Start</label>
+                      <input type="time" id="setQuietStart" class="form-control" value="22:00" />
+                    </div>
+                    <div class="form-group">
+                      <label>Quiet Hours End</label>
+                      <input type="time" id="setQuietEnd" class="form-control" value="07:00" />
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label>Notification Frequency</label>
+                    <select id="setFrequency" class="form-control">
+                      <option value="minimal">Minimal (Only urgent events)</option>
+                      <option value="normal" selected>Normal (Mindful habit cadence)</option>
+                      <option value="frequent">Frequent (Active reminders)</option>
+                    </select>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary">Save Reminder Preferences</button>
+                </form>
+              </div>
+
+              <!-- Data Privacy, Export & Danger Zone -->
+              <div class="card">
+                <h3 class="card-title">Data Privacy & Security</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;">
+                  Your health and mood records belong strictly to you. LifeCare never sells data or displays commercial advertisements.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                  <button class="btn btn-secondary" id="btnExportData">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    <span>Export All Personal Data (JSON)</span>
+                  </button>
+                  <button class="btn btn-secondary" id="btnClearHealthHistory" style="color: #DC2626;">
+                    <span>Clear Health & Mood History</span>
+                  </button>
+                  <button class="btn btn-secondary" id="btnDeleteAccount" style="color: #991B1B;">
+                    <span>Delete Account Permanently</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- TASK / EVENT CREATE MODAL -->
+  <div class="modal-overlay" id="taskModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="taskModalTitle">Create Task or Event</h3>
+        <button class="modal-close" id="taskModalClose">✕</button>
+      </div>
+      <form id="taskForm">
+        <input type="hidden" id="taskIdInput" />
+        <div class="form-group">
+          <label>Task Title</label>
+          <input type="text" id="taskTitle" class="form-control" placeholder="e.g. Research Literature Review" required />
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="taskDesc" class="form-control" placeholder="Add specific notes or goals..."></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Category</label>
+            <select id="taskCategory" class="form-control" required>
+              <option value="Study">Study</option>
+              <option value="Work">Work</option>
+              <option value="Exercise">Exercise</option>
+              <option value="Personal">Personal</option>
+              <option value="Rest">Rest</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Priority</label>
+            <select id="taskPriority" class="form-control">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" id="taskDate" class="form-control" required />
+          </div>
+          <div class="form-group">
+            <label>Start Time</label>
+            <input type="time" id="taskStartTime" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label>End Time</label>
+            <input type="time" id="taskEndTime" class="form-control" />
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Save Task</button>
+          <button type="button" class="btn btn-secondary" id="taskModalCancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- FEATURE 1: 30-SECOND RAPID CHECK-IN MODAL -->
+  <div class="modal-overlay" id="rapidCheckinModal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <div>
+          <h3>⚡ 30-Second Daily Check-in</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Quick morning or evening pulse</p>
+        </div>
+        <button class="modal-close" id="rapidModalClose">✕</button>
+      </div>
+      <form id="rapidCheckinForm">
+        <div class="form-group">
+          <label>1. How are you feeling right now?</label>
+          <select id="rapidMood" class="form-control">
+            <option value="Happy">😊 Happy</option>
+            <option value="Relaxed" selected>😌 Relaxed</option>
+            <option value="Excited">✨ Excited</option>
+            <option value="Normal">🙂 Normal</option>
+            <option value="Tired">🥱 Tired</option>
+            <option value="Stressed">😣 Stressed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>2. Did you sleep well?</label>
+          <select id="rapidSleep" class="form-control">
+            <option value="7.5">Yes, full restful night (~7.5h)</option>
+            <option value="6.0">Average sleep (~6h)</option>
+            <option value="5.0">Restless or short (~5h)</option>
+            <option value="8.5">Very deep long sleep (~8.5h)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>3. Feeling under any pressing stress today?</label>
+          <select id="rapidStress" class="form-control">
+            <option value="1">1 - Not stressed at all</option>
+            <option value="2" selected>2 - Mild, manageable</option>
+            <option value="3">3 - Moderate tension</option>
+            <option value="4">4 - High pressure</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Complete 30s Check-in</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- FEATURE 2: AI WELLNESS ASSISTANT CHAT DRAWER -->
+  <div class="ai-chat-drawer" id="aiChatDrawer">
+    <div class="ai-header">
+      <h4>
+        <span>✨</span> LifeCare AI Wellness Assistant
+      </h4>
+      <button class="btn-icon" id="closeAiDrawerBtn" style="background: transparent; border: none; color: #fff;">✕</button>
+    </div>
+    <div class="ai-messages-area" id="aiChatMessages">
+      <div class="chat-msg assistant">
+        Hello Alex! I am your mindful wellness companion. I can help you balance high-focus work sessions, suggest restorative breaks, or review your schedule. How can I help you today?
+      </div>
+    </div>
+    <form class="ai-chat-input-bar" id="aiChatForm">
+      <input type="text" id="aiChatInput" class="form-control" placeholder="Ask for advice or schedule check..." autocomplete="off" />
+      <button type="submit" class="btn btn-primary" style="padding: 0 16px;">Send</button>
+    </form>
+  </div>
+
+  <!-- NOTIFICATION DROPDOWN POPUP -->
+  <div class="modal-overlay" id="notifModal">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3>🔔 Habit & Schedule Reminders</h3>
+        <button class="modal-close" id="notifModalClose">✕</button>
+      </div>
+      <div id="notifListContainer" style="display: flex; flex-direction: column; gap: 10px;">
+        <!-- Injected via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- APP SCRIPTS -->
   <script src="/js/app.js"></script>
 </body>
 </html>

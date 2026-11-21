@@ -1,5 +1,13 @@
-# Bỏ qua tệp hệ thống macOS
+# macOS system files
 .DS_Store
 
-# Bỏ qua thư mục thư viện Node.js
+# Node.js dependencies
 node_modules/
+package-lock.json
+
+# Local SQLite databases (Ephemeral on Vercel)
+data/*.sqlite*
+data/*.json
+
+# Vercel deployment cache
+.vercel/

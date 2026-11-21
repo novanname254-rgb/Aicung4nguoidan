@@ -1,12 +1,12 @@
 {
-  "name": "PlanMaster AI - Lập Kế Hoạch & Sức Khỏe Tinh Thần",
-  "short_name": "PlanMaster",
-  "description": "Ứng dụng lập kế hoạch thông minh, khảo sát sức khoẻ tâm lý và thông báo lịch trình",
+  "name": "LifeCare – Your Life, Your Balance",
+  "short_name": "LifeCare",
+  "description": "Personal planner and holistic health care platform helping you balance productivity, physical health, and emotional well-being.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#6366f1",
-  "orientation": "any",
+  "orientation": "portrait-primary",
+  "background_color": "#F8FAFC",
+  "theme_color": "#6C9CE8",
   "icons": [
     {
       "src": "/icons/icon-192.svg",
