@@ -1099,3 +1099,209 @@ textarea.form-control {
     height: 75vh;
   }
 }
+
+
+/* Additional UX, Overlap, Recurring, Journal and Mobile enhancements */
+
+/* Overdue task badge */
+.badge-overdue {
+  background: #FEE2E2;
+  color: #DC2626;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Overlap alert indicator */
+.badge-overlap {
+  background: #FEF3C7;
+  color: #B45309;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Recurring badge */
+.badge-recurring {
+  background: #E0E7FF;
+  color: #4338CA;
+  font-size: 0.7rem;
+}
+
+/* Today's Well-being composite score card */
+.wellbeing-card {
+  background: linear-gradient(135deg, rgba(168,213,186,0.2) 0%, rgba(108,156,232,0.15) 100%);
+  border: 1px solid rgba(168,213,186,0.4);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.wellbeing-score-circle {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #fff;
+  border: 4px solid var(--secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: var(--text-heading);
+  box-shadow: var(--shadow-sm);
+  flex-shrink: 0;
+}
+[data-theme="dark"] .wellbeing-score-circle {
+  background: var(--bg-card);
+  border-color: var(--secondary);
+}
+
+.wellbeing-score-circle span {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Mood Calendar Grid */
+.mood-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+.mood-cal-header {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 4px;
+  text-transform: uppercase;
+}
+.mood-cal-cell {
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 4px;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.mood-cal-cell:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+.mood-cal-cell .date-num {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.mood-cal-cell .mood-icon {
+  font-size: 1.25rem;
+  margin-top: 2px;
+}
+
+/* Emotional Journal Cards */
+.journal-entry-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 12px;
+  border-left: 4px solid var(--accent);
+}
+.journal-entry-card .journal-date {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+.journal-entry-card .journal-content {
+  font-size: 0.88rem;
+  color: var(--text-heading);
+  line-height: 1.6;
+}
+
+/* AI Mode Selection Segmented Control */
+.ai-mode-tabs {
+  display: flex;
+  background: var(--bg-subtle);
+  padding: 4px;
+  border-radius: var(--radius-md);
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.ai-mode-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+.ai-mode-btn.active {
+  background: var(--bg-card);
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Language selector button in header */
+.lang-btn {
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  color: var(--text-heading);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lang-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* Touch targets and mobile calendar fixes */
+@media (max-width: 768px) {
+  .month-grid {
+    gap: 4px;
+  }
+  .month-day-cell {
+    min-height: 65px;
+    padding: 4px;
+  }
+  .month-day-cell .day-num {
+    font-size: 0.72rem;
+  }
+  .month-day-cell .day-tasks-pill {
+    font-size: 0.6rem;
+    padding: 1px 3px;
+  }
+  .btn, .form-control, .nav-link {
+    min-height: 44px; /* Touch-friendly size */
+  }
+  .mood-picker-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

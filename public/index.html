@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="vi" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -30,8 +30,8 @@
     <div class="modal-content" style="max-width: 440px;">
       <div class="modal-header">
         <div>
-          <h3 id="authModalTitle">Sign In to LifeCare</h3>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">Your Life, Your Balance</p>
+          <h3 id="authModalTitle" data-i18n="signInTitle">Đăng Nhập LifeCare</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;" data-i18n="brandTagline">Cuộc Sống & Sự Cân Bằng</p>
         </div>
         <button class="modal-close" id="authModalClose" style="display: none;">✕</button>
       </div>
@@ -39,77 +39,76 @@
       <!-- Login Form -->
       <form id="loginForm">
         <div class="form-group">
-          <label>Email Address</label>
+          <label data-i18n="email">Địa chỉ Email</label>
           <input type="email" id="loginEmail" class="form-control" placeholder="alex.balance@lifecare.app" required />
         </div>
         <div class="form-group">
-          <label>Password</label>
+          <label data-i18n="password">Mật khẩu</label>
           <input type="password" id="loginPassword" class="form-control" placeholder="••••••••" required />
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; font-size: 0.82rem;">
           <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-muted);">
-            <input type="checkbox" id="rememberMe" checked /> Remember me
+            <input type="checkbox" id="rememberMe" checked /> <span data-i18n="rememberMe">Ghi nhớ đăng nhập</span>
           </label>
-          <a href="#" id="showForgotLink" style="color: var(--primary); text-decoration: none; font-weight: 600;">Forgot password?</a>
+          <a href="#" id="showForgotLink" style="color: var(--primary); text-decoration: none; font-weight: 600;" data-i18n="forgotPassword">Quên mật khẩu?</a>
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Sign In</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="signInBtn">Đăng Nhập</button>
         <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
-          Don't have an account? <a href="#" id="showRegisterLink" style="color: var(--primary); font-weight: 700; text-decoration: none;">Create one free</a>
+          <span data-i18n="createOneFree">Chưa có tài khoản?</span> <a href="#" id="showRegisterLink" style="color: var(--primary); font-weight: 700; text-decoration: none;" data-i18n="createAccountBtn">Đăng ký ngay</a>
         </p>
       </form>
 
       <!-- Register Form -->
       <form id="registerForm" style="display: none;">
         <div class="form-group">
-          <label>Full Name</label>
-          <input type="text" id="regFullName" class="form-control" placeholder="e.g. Jordan Smith" required />
+          <label data-i18n="fullName">Họ và tên</label>
+          <input type="text" id="regFullName" class="form-control" placeholder="e.g. Nguyễn Văn An" required />
         </div>
         <div class="form-group">
-          <label>Email Address</label>
-          <input type="email" id="regEmail" class="form-control" placeholder="jordan@example.com" required />
+          <label data-i18n="email">Địa chỉ Email</label>
+          <input type="email" id="regEmail" class="form-control" placeholder="an.nguyen@example.com" required />
         </div>
         <div class="form-group">
-          <label>Password</label>
-          <input type="password" id="regPassword" class="form-control" placeholder="At least 6 characters" minlength="6" required />
+          <label data-i18n="password">Mật khẩu</label>
+          <input type="password" id="regPassword" class="form-control" placeholder="Tối thiểu 6 ký tự" minlength="6" required />
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Date of Birth (Optional)</label>
+            <label data-i18n="dob">Ngày sinh (Không bắt buộc)</label>
             <input type="date" id="regDob" class="form-control" />
           </div>
           <div class="form-group">
-            <label>Gender (Optional)</label>
+            <label data-i18n="gender">Giới tính</label>
             <select id="regGender" class="form-control">
-              <option value="">Prefer not to say</option>
-              <option value="Female">Female</option>
-              <option value="Male">Male</option>
-              <option value="Non-binary">Non-binary</option>
-              <option value="Other">Other</option>
+              <option value="" data-i18n="preferNotToSay">Không muốn tiết lộ</option>
+              <option value="Female" data-i18n="female">Nữ</option>
+              <option value="Male" data-i18n="male">Nam</option>
+              <option value="Non-binary" data-i18n="nonBinary">Khác</option>
             </select>
           </div>
         </div>
         <div class="form-group">
-          <label>Personal Wellness Goals</label>
-          <input type="text" id="regGoals" class="form-control" placeholder="e.g. Sleep 8h, daily walk, reduce stress" />
+          <label data-i18n="goals">Mục tiêu sức khỏe cá nhân</label>
+          <input type="text" id="regGoals" class="form-control" placeholder="e.g. Ngủ 8h, đi bộ hằng ngày, giảm căng thẳng" />
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Create My Account</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="createAccountBtn">Tạo Tài Khoản</button>
         <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
-          Already have an account? <a href="#" id="showLoginLink" style="color: var(--primary); font-weight: 700; text-decoration: none;">Sign in</a>
+          <span data-i18n="alreadyHaveAccount">Đã có tài khoản?</span> <a href="#" id="showLoginLink" style="color: var(--primary); font-weight: 700; text-decoration: none;" data-i18n="signInBtn">Đăng nhập</a>
         </p>
       </form>
 
       <!-- Forgot Password Form -->
       <form id="forgotForm" style="display: none;">
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
-          Enter your registered email address and we'll send you verification steps to reset your password.
+          Nhập email đã đăng ký của bạn để nhận hướng dẫn khôi phục mật khẩu an toàn.
         </p>
         <div class="form-group">
-          <label>Email Address</label>
+          <label data-i18n="email">Địa chỉ Email</label>
           <input type="email" id="forgotEmail" class="form-control" placeholder="alex.balance@lifecare.app" required />
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Send Instructions</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="sendInstructions">Gửi Hướng Dẫn</button>
         <p style="text-align: center; margin-top: 16px; font-size: 0.85rem;">
-          <a href="#" id="backToLoginLink" style="color: var(--primary); text-decoration: none; font-weight: 600;">← Back to sign in</a>
+          <a href="#" id="backToLoginLink" style="color: var(--primary); text-decoration: none; font-weight: 600;" data-i18n="backToSignIn">← Quay lại đăng nhập</a>
         </p>
       </form>
     </div>
@@ -127,8 +126,8 @@
             </svg>
           </div>
           <div>
-            <div class="brand-title">LifeCare</div>
-            <div class="brand-tagline">Your Life, Your Balance</div>
+            <div class="brand-title" data-i18n="brandTitle">LifeCare</div>
+            <div class="brand-tagline" data-i18n="brandTagline">Cuộc Sống & Sự Cân Bằng</div>
           </div>
         </a>
       </div>
@@ -137,37 +136,37 @@
       <nav class="sidebar-nav">
         <button class="nav-link active" data-view="dashboard">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-          <span>Dashboard</span>
+          <span data-i18n="navDashboard">Bảng Điều Khiển</span>
         </button>
 
         <button class="nav-link" data-view="planner">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-          <span>My Planner</span>
+          <span data-i18n="navPlanner">Kế Hoạch Của Tôi</span>
         </button>
 
         <button class="nav-link" data-view="physical">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          <span>Physical Health</span>
+          <span data-i18n="navPhysical">Sức Khỏe Thể Chất</span>
         </button>
 
         <button class="nav-link" data-view="mental">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-          <span>Mental Wellness</span>
+          <span data-i18n="navMental">Sức Khỏe Tinh Thần</span>
         </button>
 
         <button class="nav-link" data-view="timeline">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span>Health Timeline</span>
+          <span data-i18n="navTimeline">Dòng Thời Gian</span>
         </button>
 
         <button class="nav-link" data-view="statistics">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-          <span>Statistics & Reports</span>
+          <span data-i18n="navStatistics">Thống Kê & Báo Cáo</span>
         </button>
 
         <button class="nav-link" data-view="settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          <span>Settings & Privacy</span>
+          <span data-i18n="navSettings">Cài Đặt & Quyền Riêng Tư</span>
         </button>
       </nav>
 
@@ -194,20 +193,26 @@
           <button class="mobile-toggle" id="mobileMenuBtn">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
-          <div class="page-title" id="pageTitle">Dashboard</div>
+          <div class="page-title" id="pageTitle" data-i18n="navDashboard">Bảng Điều Khiển</div>
         </div>
 
         <div class="header-right">
+          <!-- Language Toggle Button -->
+          <button class="lang-btn" id="langSwitchBtn" title="Switch Language / Đổi ngôn ngữ">
+            <span id="currentLangFlag">🇻🇳</span>
+            <span id="currentLangText">VI</span>
+          </button>
+
           <!-- Install PWA Button -->
           <button class="btn btn-secondary" id="pwaInstallBtn" style="display: none;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-            <span>Install App</span>
+            <span data-i18n="installApp">Cài Đặt App</span>
           </button>
 
           <!-- AI Assistant Launcher -->
           <button class="btn btn-accent" id="openAiDrawerBtn" title="Chat with AI Wellness Assistant">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
-            <span>AI Wellness Assistant</span>
+            <span data-i18n="aiAssistant">Trợ Lý AI</span>
           </button>
 
           <!-- Notification Bell -->
@@ -233,15 +238,15 @@
           <!-- Welcome Hero Section -->
           <div class="welcome-hero">
             <div>
-              <h2 class="welcome-greeting" id="welcomeGreeting">Good afternoon, Alex! ☀️</h2>
-              <p class="welcome-sub" id="welcomeMotivational">"Balance is not something you find, it's something you create." Today is <strong id="currentDateDisplay">Today</strong>.</p>
+              <h2 class="welcome-greeting" id="welcomeGreeting">Chào buổi chiều! ☀️</h2>
+              <p class="welcome-sub" id="welcomeMotivational">"Sự cân bằng không phải tự nhiên có, mà do chính bạn tạo ra." <span data-i18n="todayIs">Hôm nay là</span> <strong id="currentDateDisplay">Đang tải...</strong></p>
             </div>
             <div class="hero-quick-cta">
               <button class="btn btn-primary" id="btnQuickCheckin">
-                <span>⚡ 30s Daily Check-in</span>
+                <span data-i18n="quickCheckinBtn">⚡ Điểm danh nhanh 30s</span>
               </button>
               <button class="btn btn-secondary" id="btnDashNewTask">
-                <span>+ New Task</span>
+                <span data-i18n="newTaskBtn">+ Thêm Công Việc</span>
               </button>
             </div>
           </div>
@@ -251,26 +256,44 @@
             <div class="proactive-text">
               <span class="pulse-icon">🌿</span>
               <div>
-                <h4>Daily Mind & Body Check-in</h4>
-                <p>Did you sleep well last night? How are you feeling physically and emotionally today?</p>
+                <h4 data-i18n="proactiveCheckinTitle">Khảo sát thân & tâm hôm nay</h4>
+                <p data-i18n="proactiveCheckinDesc">Đêm qua bạn ngủ ngon không? Hôm nay thể chất và tâm trạng của bạn thế nào?</p>
               </div>
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="btn btn-primary" id="startRapidCheckinBtn">Start 30s Check-in</button>
-              <button class="btn btn-secondary" id="dismissProactiveBtn">Later</button>
+              <button class="btn btn-primary" id="startRapidCheckinBtn" data-i18n="startQuickCheckin">Khảo sát nhanh 30s</button>
+              <button class="btn btn-secondary" id="dismissProactiveBtn" data-i18n="dismissLater">Để sau</button>
             </div>
           </div>
 
-          <!-- Feature 4: Smart Schedule Recommendation Card -->
+          <!-- NEW: Today's Well-being Composite Section -->
+          <div class="wellbeing-card" id="todayWellbeingCard">
+            <div style="display: flex; align-items: center; gap: 16px;">
+              <div class="wellbeing-score-circle" id="wellbeingCircleScore">
+                --<span>/100</span>
+              </div>
+              <div>
+                <h4 style="font-size: 1.05rem; font-weight: 800; color: var(--text-heading);" data-i18n="todayWellbeing">Chỉ Số Cân Bằng Thân - Tâm Hôm Nay</h4>
+                <p id="wellbeingStatusText" style="font-size: 0.88rem; color: var(--text-muted); margin-top: 4px;">Đang tính toán chỉ số dựa trên giấc ngủ, vận động và cảm xúc...</p>
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px; font-size: 0.82rem; color: var(--text-muted);">
+              <div>💤 <span id="wellbeingSleepPill">--h ngủ</span></div>
+              <div>⚡ <span id="wellbeingEnergyPill">Năng lượng: --/5</span></div>
+              <div>🧘 <span id="wellbeingStressPill">Căng thẳng: --/5</span></div>
+            </div>
+          </div>
+
+          <!-- Smart Schedule Recommendation Card -->
           <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary);" id="scheduleRecCard">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
               <div>
                 <h4 style="font-size: 1.05rem; font-weight: 800; color: var(--text-heading); display: flex; align-items: center; gap: 8px;">
-                  <span>💡 Smart Schedule Balance Recommendation</span>
+                  <span>💡</span> <span data-i18n="scheduleRecTitle">Gợi Ý Cân Bằng Lịch Trình Thông Minh</span>
                 </h4>
-                <p id="scheduleRecSummary" style="font-size: 0.88rem; color: var(--text-muted); margin-top: 4px;">Analyzing your schedule balance...</p>
+                <p id="scheduleRecSummary" style="font-size: 0.88rem; color: var(--text-muted); margin-top: 4px;">Đang phân tích thời gian biểu...</p>
               </div>
-              <button class="btn btn-secondary" id="btnApplyScheduleRec" style="font-size: 0.8rem; padding: 6px 12px;">Review Advice</button>
+              <button class="btn btn-secondary" id="btnApplyScheduleRec" style="font-size: 0.8rem; padding: 6px 12px;" data-i18n="reviewAdvice">Xem Lời Khuyên</button>
             </div>
           </div>
 
@@ -280,9 +303,9 @@
               <div class="metric-card">
                 <div class="metric-icon-box blue">✓</div>
                 <div class="metric-info">
-                  <div class="label">Completed Tasks</div>
+                  <div class="label" data-i18n="completedTasks">Đã hoàn thành</div>
                   <div class="value" id="dashCompletedTasks">0</div>
-                  <div class="subtext" id="dashCompletionRate">0% of today's plan</div>
+                  <div class="subtext" id="dashCompletionRate">0% mục tiêu ngày</div>
                 </div>
               </div>
             </div>
@@ -291,9 +314,9 @@
               <div class="metric-card">
                 <div class="metric-icon-box orange">⏳</div>
                 <div class="metric-info">
-                  <div class="label">Remaining Tasks</div>
+                  <div class="label" data-i18n="remainingTasks">Còn lại hôm nay</div>
                   <div class="value" id="dashRemainingTasks">0</div>
-                  <div class="subtext">Pending for today</div>
+                  <div class="subtext" id="dashRemainingSub">Công việc đang chờ</div>
                 </div>
               </div>
             </div>
@@ -302,9 +325,9 @@
               <div class="metric-card">
                 <div class="metric-icon-box green">💤</div>
                 <div class="metric-info">
-                  <div class="label">Sleep Recorded</div>
+                  <div class="label" data-i18n="sleepRecorded">Giấc ngủ ghi nhận</div>
                   <div class="value" id="dashSleepDuration">--</div>
-                  <div class="subtext" id="dashSleepQuality">Quality: Pending</div>
+                  <div class="subtext" id="dashSleepQuality">Chưa điểm danh</div>
                 </div>
               </div>
             </div>
@@ -313,9 +336,9 @@
               <div class="metric-card">
                 <div class="metric-icon-box purple">✨</div>
                 <div class="metric-info">
-                  <div class="label">Emotional State</div>
-                  <div class="value" id="dashMoodValue">Balanced</div>
-                  <div class="subtext" id="dashMoodSub">Weekly mood logged</div>
+                  <div class="label" data-i18n="emotionalState">Trạng thái cảm xúc</div>
+                  <div class="value" id="dashMoodValue">Cân bằng</div>
+                  <div class="subtext" id="dashMoodSub">Ghi nhận gần nhất</div>
                 </div>
               </div>
             </div>
@@ -326,8 +349,8 @@
             <div class="col-8">
               <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                  <h3 class="card-title" style="margin-bottom: 0;">Today's Schedule & Tasks</h3>
-                  <button class="btn btn-secondary" id="btnGoToPlanner" style="font-size: 0.82rem; padding: 6px 12px;">Full Calendar →</button>
+                  <h3 class="card-title" style="margin-bottom: 0;" data-i18n="todaySchedule">Lịch Trình & Công Việc Hôm Nay</h3>
+                  <button class="btn btn-secondary" id="btnGoToPlanner" style="font-size: 0.82rem; padding: 6px 12px;" data-i18n="fullCalendar">Xem Lịch Đầy Đủ →</button>
                 </div>
                 <div id="dashTodayTasksList">
                   <!-- Injected via JS -->
@@ -338,24 +361,24 @@
             <div class="col-4">
               <!-- Health & Mood Quick Overview Card -->
               <div class="card" style="margin-bottom: 20px;">
-                <h3 class="card-title">Health Overview</h3>
+                <h3 class="card-title" data-i18n="healthOverview">Tổng Quan Sức Khỏe Thể Chất</h3>
                 <div id="dashHealthOverviewContent" style="font-size: 0.9rem;">
                   <!-- Injected via JS -->
                 </div>
                 <div style="display: flex; gap: 8px; margin-top: 16px;">
-                  <button class="btn btn-primary" id="btnDashPhysCheckin" style="flex: 1; font-size: 0.82rem;">Physical Log</button>
-                  <button class="btn btn-secondary" id="btnDashMoodCheckin" style="flex: 1; font-size: 0.82rem;">Mood Log</button>
+                  <button class="btn btn-primary" id="btnDashPhysCheckin" style="flex: 1; font-size: 0.82rem;" data-i18n="physicalLog">Nhật Ký Thể Chất</button>
+                  <button class="btn btn-secondary" id="btnDashMoodCheckin" style="flex: 1; font-size: 0.82rem;" data-i18n="moodLog">Nhật Ký Cảm Xúc</button>
                 </div>
               </div>
 
               <!-- Quick Supportive Message Card -->
               <div class="card">
-                <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin-bottom: 8px;">Mindful Thought</h4>
+                <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin-bottom: 8px;" data-i18n="mindfulThought">Góc Nhìn Chánh Niệm</h4>
                 <p id="dashSupportiveMsg" style="font-size: 0.86rem; color: var(--text-muted); line-height: 1.6;">
-                  "Take a slow breath. Balance is about doing the right things at a sustainable pace."
+                  "Hãy hít thở chậm lại. Sự cân bằng là làm đúng việc với tốc độ vừa vặn và bền bỉ."
                 </p>
                 <div style="margin-top: 14px; text-align: right;">
-                  <button class="btn btn-accent" id="btnDashWeeklyReport" style="font-size: 0.8rem; padding: 6px 12px;">View Weekly Report →</button>
+                  <button class="btn btn-accent" id="btnDashWeeklyReport" style="font-size: 0.8rem; padding: 6px 12px;" data-i18n="viewWeeklyReport">Báo Cáo Tuần →</button>
                 </div>
               </div>
             </div>
@@ -369,31 +392,31 @@
           <div class="card" style="margin-bottom: 20px;">
             <div class="calendar-controls">
               <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-                <button class="btn btn-primary" id="btnOpenNewTaskModal">+ Create Task / Event</button>
+                <button class="btn btn-primary" id="btnOpenNewTaskModal" data-i18n="createTaskEvent">+ Tạo Công Việc / Sự Kiện</button>
                 <div class="calendar-view-tabs">
-                  <button class="view-tab-btn active" data-cal-view="month">Month</button>
-                  <button class="view-tab-btn" data-cal-view="week">Week</button>
-                  <button class="view-tab-btn" data-cal-view="day">Day</button>
+                  <button class="view-tab-btn active" data-cal-view="month" data-i18n="month">Tháng</button>
+                  <button class="view-tab-btn" data-cal-view="week" data-i18n="week">Tuần</button>
+                  <button class="view-tab-btn" data-cal-view="day" data-i18n="day">Ngày</button>
                 </div>
               </div>
 
               <!-- Search & Filters -->
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <input type="text" id="taskSearchInput" class="form-control" placeholder="Search tasks..." style="width: 180px; padding: 6px 12px;" />
-                <select id="taskCategoryFilter" class="form-control" style="width: 130px; padding: 6px 10px;">
-                  <option value="all">All Categories</option>
-                  <option value="Study">Study</option>
-                  <option value="Work">Work</option>
-                  <option value="Exercise">Exercise</option>
-                  <option value="Personal">Personal</option>
-                  <option value="Rest">Rest</option>
-                  <option value="Other">Other</option>
+                <input type="text" id="taskSearchInput" class="form-control" placeholder="Tìm kiếm công việc..." style="width: 180px; padding: 6px 12px;" />
+                <select id="taskCategoryFilter" class="form-control" style="width: 140px; padding: 6px 10px;">
+                  <option value="all" data-i18n="allCategories">Tất cả danh mục</option>
+                  <option value="Study" data-i18n="categoryStudy">Học tập</option>
+                  <option value="Work" data-i18n="categoryWork">Công việc</option>
+                  <option value="Exercise" data-i18n="categoryExercise">Thể thao</option>
+                  <option value="Personal" data-i18n="categoryPersonal">Cá nhân</option>
+                  <option value="Rest" data-i18n="categoryRest">Nghỉ ngơi</option>
+                  <option value="Other" data-i18n="categoryOther">Khác</option>
                 </select>
-                <select id="taskPriorityFilter" class="form-control" style="width: 130px; padding: 6px 10px;">
-                  <option value="all">All Priorities</option>
-                  <option value="high">High Priority</option>
-                  <option value="medium">Medium Priority</option>
-                  <option value="low">Low Priority</option>
+                <select id="taskPriorityFilter" class="form-control" style="width: 140px; padding: 6px 10px;">
+                  <option value="all" data-i18n="allPriorities">Tất cả ưu tiên</option>
+                  <option value="high" data-i18n="priorityHigh">Ưu tiên cao</option>
+                  <option value="medium" data-i18n="priorityMedium">Ưu tiên vừa</option>
+                  <option value="low" data-i18n="priorityLow">Ưu tiên thấp</option>
                 </select>
               </div>
             </div>
@@ -406,7 +429,7 @@
 
           <!-- All Tasks Management List -->
           <div class="card">
-            <h3 class="card-title">Tasks & Schedule Management</h3>
+            <h3 class="card-title" data-i18n="navPlanner">Quản Lý Công Việc & Lịch Trình</h3>
             <div id="allTasksList">
               <!-- Injected via JS -->
             </div>
@@ -420,61 +443,73 @@
           <div class="dashboard-grid">
             <div class="col-7">
               <div class="card">
-                <h3 class="card-title">Daily Physical Health Check-in</h3>
-                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;">
-                  Track your physical vitality, sleep, exercise, and hydration. You can skip questions you do not wish to answer.
+                <h3 class="card-title" data-i18n="physicalTitle">Khảo Sát Sức Khỏe Thể Chất Hằng Ngày</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 20px;" data-i18n="physicalDesc">
+                  Theo dõi năng lượng thể chất, giấc ngủ, tập luyện và dinh dưỡng. Bạn có thể bỏ qua các câu hỏi chưa muốn trả lời.
                 </p>
 
                 <form id="physicalCheckinForm">
                   <div class="form-group">
-                    <label>Check-in Date</label>
+                    <label data-i18n="checkinDate">Ngày khảo sát</label>
                     <input type="date" id="physDate" class="form-control" required />
                   </div>
 
                   <div class="form-group">
-                    <label>1. How are you feeling physically today?</label>
+                    <label data-i18n="feelPhysically">1. Thể chất hôm nay của bạn thế nào?</label>
                     <select id="physCondition" class="form-control">
-                      <option value="Very Good">Very good</option>
-                      <option value="Good" selected>Good</option>
-                      <option value="Normal">Normal</option>
-                      <option value="Tired">Tired</option>
-                      <option value="Unwell">Unwell</option>
+                      <option value="Very Good" data-i18n="condVeryGood">Rất tốt</option>
+                      <option value="Good" selected data-i18n="condGood">Tốt</option>
+                      <option value="Normal" data-i18n="condNormal">Bình thường</option>
+                      <option value="Tired" data-i18n="condTired">Mệt mỏi</option>
+                      <option value="Unwell" data-i18n="condUnwell">Không khỏe</option>
                     </select>
                   </div>
 
                   <div class="form-row">
                     <div class="form-group">
-                      <label>2. Sleep duration (hours)</label>
+                      <label data-i18n="sleepHours">2. Thời lượng ngủ (giờ)</label>
                       <input type="number" step="0.5" min="0" max="24" id="physSleepHours" class="form-control" placeholder="e.g. 7.5" />
                     </div>
                     <div class="form-group">
-                      <label>3. Sleep quality</label>
+                      <label data-i18n="sleepQuality">3. Chất lượng giấc ngủ</label>
                       <select id="physSleepQuality" class="form-control">
-                        <option value="Very Good">Very good</option>
-                        <option value="Good" selected>Good</option>
-                        <option value="Average">Average</option>
-                        <option value="Poor">Poor</option>
-                        <option value="Very Poor">Very poor</option>
+                        <option value="Very Good" data-i18n="qualityVeryGood">Rất tốt</option>
+                        <option value="Good" selected data-i18n="qualityGood">Tốt</option>
+                        <option value="Average" data-i18n="qualityAverage">Trung bình</option>
+                        <option value="Poor" data-i18n="qualityPoor">Kém</option>
+                        <option value="Very Poor" data-i18n="qualityVeryPoor">Rất kém</option>
                       </select>
                     </div>
                   </div>
 
                   <div class="form-row">
                     <div class="form-group">
-                      <label>4. Did you exercise today?</label>
+                      <label data-i18n="didExercise">4. Bạn có tập thể dục hôm nay không?</label>
                       <select id="physExercise" class="form-control">
-                        <option value="Yes">Yes, exercised</option>
-                        <option value="No">No exercise</option>
+                        <option value="Yes" data-i18n="exerciseYes">Có vận động</option>
+                        <option value="No" selected data-i18n="exerciseNo">Không tập luyện</option>
                       </select>
                     </div>
                     <div class="form-group">
-                      <label>5. Water intake (Liters)</label>
+                      <label data-i18n="waterIntake">5. Lượng nước đã uống (Lít)</label>
                       <input type="number" step="0.1" min="0" max="10" id="physWater" class="form-control" placeholder="e.g. 2.0" />
                     </div>
                   </div>
 
+                  <!-- Exercise details -->
+                  <div class="form-row" id="exerciseDetailsRow" style="display: none;">
+                    <div class="form-group">
+                      <label data-i18n="exerciseType">Hình thức tập</label>
+                      <input type="text" id="physExerciseType" class="form-control" placeholder="e.g. Đi bộ, yoga, gym, chạy bộ..." />
+                    </div>
+                    <div class="form-group">
+                      <label data-i18n="exerciseDuration">Thời lượng tập (phút)</label>
+                      <input type="number" id="physExerciseDuration" min="0" max="300" class="form-control" placeholder="30" />
+                    </div>
+                  </div>
+
                   <div class="form-group">
-                    <label>6. Energy Level (1 to 5)</label>
+                    <label data-i18n="energyLevel">6. Mức năng lượng (1 đến 5)</label>
                     <div class="rating-group" id="energyRatingGroup">
                       <button type="button" class="rating-btn" data-val="1">1</button>
                       <button type="button" class="rating-btn" data-val="2">2</button>
@@ -485,24 +520,30 @@
                     <input type="hidden" id="physEnergyLevel" value="4" />
                   </div>
 
+                  <!-- Meal tracking -->
                   <div class="form-group">
-                    <label>7. Any physical discomfort or symptoms?</label>
-                    <input type="text" id="physDiscomfort" class="form-control" placeholder="e.g. slight shoulder tension, headache, none" />
+                    <label data-i18n="mealsTracking">7. Nhật ký bữa ăn dinh dưỡng</label>
+                    <input type="text" id="physMealsSummary" class="form-control" placeholder="e.g. Sáng: bánh mì trứng, Trưa: cơm rau cá, Tối: salad ức gà" />
                   </div>
 
                   <div class="form-group">
-                    <label>Personal Health Notes (Optional)</label>
-                    <textarea id="physNotes" class="form-control" placeholder="Notes about nutrition, posture, or physical habits..."></textarea>
+                    <label data-i18n="discomfortNotes">8. Triệu chứng cơ thể hoặc cảm giác khó chịu</label>
+                    <input type="text" id="physDiscomfort" class="form-control" placeholder="e.g. mỏi vai gáy do ngồi lâu, đau đầu nhẹ, không có..." />
                   </div>
 
-                  <button type="submit" class="btn btn-primary" style="width: 100%;">Save Daily Health Check-in</button>
+                  <div class="form-group">
+                    <label data-i18n="physNotes">Ghi chú sức khỏe bổ sung</label>
+                    <textarea id="physNotes" class="form-control" placeholder="Ghi chú thêm về cảm giác cơ thể..."></textarea>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="savePhysicalBtn">Lưu Khảo Sát Thể Chất</button>
                 </form>
 
                 <!-- Medical Disclaimer Requirement -->
                 <div class="medical-alert-box">
                   <span>ℹ️</span>
-                  <div>
-                    <strong>Medical Disclaimer:</strong> LifeCare is an organizational and self-reflection companion. It does not provide medical diagnoses or replace consultations with licensed healthcare providers. If you experience distressing or severe symptoms, please seek professional medical care promptly.
+                  <div data-i18n="medicalDisclaimer">
+                    Lưu ý y tế quan trọng: LifeCare là ứng dụng hỗ trợ thói quen và lối sống, không đưa ra chẩn đoán hay thay thế tư vấn y khoa chuyên nghiệp. Khi có triệu chứng bất thường, hãy thăm khám bác sĩ.
                   </div>
                 </div>
               </div>
@@ -510,7 +551,7 @@
 
             <div class="col-5">
               <div class="card">
-                <h3 class="card-title">Recent Health Check-in Records</h3>
+                <h3 class="card-title" data-i18n="recentHealthHistory">Lịch Sử Thể Chất & Triệu Chứng</h3>
                 <div id="physicalHistoryList">
                   <!-- Injected via JS -->
                 </div>
@@ -525,141 +566,153 @@
         <section class="view-section" id="view-mental">
           <div class="dashboard-grid">
             <div class="col-7">
-              <div class="card">
-                <h3 class="card-title">Daily Mood & Mental Wellness Reflection</h3>
-                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 18px;">
-                  A safe, private space to acknowledge your emotions. Emotions are natural signals—not diagnoses.
+              <div class="card" style="margin-bottom: 20px;">
+                <h3 class="card-title" data-i18n="mentalTitle">Khảo Sát & Nhật Ký Sức Khỏe Tinh Thần</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 18px;" data-i18n="mentalDesc">
+                  Không gian an toàn và riêng tư để lắng nghe cảm xúc bản thân. Mọi cảm xúc đều có giá trị.
                 </p>
 
                 <form id="moodCheckinForm">
                   <div class="form-group">
-                    <label>How are you feeling today? Select an emotion:</label>
+                    <label data-i18n="howFeelingToday">Hôm nay bạn cảm thấy thế nào? Hãy chọn một cảm xúc:</label>
                     <div class="mood-picker-grid" id="moodPickerGrid">
                       <div class="mood-option-btn active" data-mood="Happy" data-emoji="😊">
                         <span class="mood-emoji">😊</span>
-                        <span class="mood-name">Happy</span>
+                        <span class="mood-name" data-i18n="moodHappy">Vui vẻ</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Excited" data-emoji="✨">
                         <span class="mood-emoji">✨</span>
-                        <span class="mood-name">Excited</span>
+                        <span class="mood-name" data-i18n="moodExcited">Hào hứng</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Relaxed" data-emoji="😌">
                         <span class="mood-emoji">😌</span>
-                        <span class="mood-name">Relaxed</span>
+                        <span class="mood-name" data-i18n="moodRelaxed">Thư thái</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Normal" data-emoji="🙂">
                         <span class="mood-emoji">🙂</span>
-                        <span class="mood-name">Normal</span>
+                        <span class="mood-name" data-i18n="moodNormal">Bình thường</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Tired" data-emoji="🥱">
                         <span class="mood-emoji">🥱</span>
-                        <span class="mood-name">Tired</span>
+                        <span class="mood-name" data-i18n="moodTired">Mệt mỏi</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Stressed" data-emoji="😣">
                         <span class="mood-emoji">😣</span>
-                        <span class="mood-name">Stressed</span>
+                        <span class="mood-name" data-i18n="moodStressed">Căng thẳng</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Sad" data-emoji="😢">
                         <span class="mood-emoji">😢</span>
-                        <span class="mood-name">Sad</span>
+                        <span class="mood-name" data-i18n="moodSad">Buồn bã</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Anxious" data-emoji="😰">
                         <span class="mood-emoji">😰</span>
-                        <span class="mood-name">Anxious</span>
+                        <span class="mood-name" data-i18n="moodAnxious">Lo lắng</span>
                       </div>
                       <div class="mood-option-btn" data-mood="Overwhelmed" data-emoji="🌪️">
                         <span class="mood-emoji">🌪️</span>
-                        <span class="mood-name">Overwhelmed</span>
+                        <span class="mood-name" data-i18n="moodOverwhelmed">Quá tải</span>
                       </div>
                     </div>
                     <input type="hidden" id="selectedMood" value="Happy" />
                     <input type="hidden" id="selectedEmoji" value="😊" />
                   </div>
 
-                  <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin: 24px 0 12px 0;">Mental Wellness Questionnaire (Scale 1–5)</h4>
-                  <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;">1 = Never &nbsp;|&nbsp; 2 = Rarely &nbsp;|&nbsp; 3 = Sometimes &nbsp;|&nbsp; 4 = Often &nbsp;|&nbsp; 5 = Almost always</p>
+                  <h4 style="font-size: 0.95rem; font-weight: 700; color: var(--text-heading); margin: 24px 0 6px 0;" data-i18n="mentalSurveyHeader">Bảng câu hỏi tự phản chiếu (Thang điểm 1 - 5)</h4>
+                  <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;" data-i18n="surveyScaleDesc">1 = Không bao giờ | 2 = Hiếm khi | 3 = Thỉnh thoảng | 4 = Thường xuyên | 5 = Gần như luôn luôn</p>
 
                   <div class="form-group">
-                    <label>1. Have you felt stressed or under pressure recently?</label>
+                    <label data-i18n="surveyStressQ">1. Gần đây bạn có cảm thấy áp lực hay căng thẳng không?</label>
                     <select id="surveyStress" class="form-control">
-                      <option value="1">1 - Never</option>
-                      <option value="2" selected>2 - Rarely</option>
-                      <option value="3">3 - Sometimes</option>
-                      <option value="4">4 - Often</option>
-                      <option value="5">5 - Almost always</option>
+                      <option value="1">1</option>
+                      <option value="2" selected>2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="5">5</option>
                     </select>
                   </div>
 
                   <div class="form-group">
-                    <label>2. Have you experienced anxiety or excessive worry?</label>
+                    <label data-i18n="surveyAnxietyQ">2. Bạn có cảm giác bất an hoặc lo lắng quá mức không?</label>
                     <select id="surveyAnxiety" class="form-control">
-                      <option value="1" selected>1 - Never</option>
-                      <option value="2">2 - Rarely</option>
-                      <option value="3">3 - Sometimes</option>
-                      <option value="4">4 - Often</option>
-                      <option value="5">5 - Almost always</option>
+                      <option value="1" selected>1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4">4</option>
+                      <option value="5">5</option>
                     </select>
                   </div>
 
                   <div class="form-group">
-                    <label>3. Have you felt motivated to complete your daily activities?</label>
+                    <label data-i18n="surveyMotivationQ">3. Bạn có động lực hoàn thành các kế hoạch trong ngày không?</label>
                     <select id="surveyMotivation" class="form-control">
-                      <option value="1">1 - Never</option>
-                      <option value="2">2 - Rarely</option>
-                      <option value="3">3 - Sometimes</option>
-                      <option value="4" selected>4 - Often</option>
-                      <option value="5">5 - Almost always</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4" selected>4</option>
+                      <option value="5">5</option>
                     </select>
                   </div>
 
                   <div class="form-group">
-                    <label>4. Have you felt connected to friends or family?</label>
+                    <label data-i18n="surveyConnectedQ">4. Bạn có cảm giác kết nối ấm áp với người thân, bạn bè không?</label>
                     <select id="surveyConnected" class="form-control">
-                      <option value="1">1 - Never</option>
-                      <option value="2">2 - Rarely</option>
-                      <option value="3">3 - Sometimes</option>
-                      <option value="4" selected>4 - Often</option>
-                      <option value="5">5 - Almost always</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4" selected>4</option>
+                      <option value="5">5</option>
                     </select>
                   </div>
 
                   <div class="form-group">
-                    <label>5. Have you had enough time to relax and unwind?</label>
+                    <label data-i18n="surveyRelaxedQ">5. Bạn có đủ thời gian dành riêng để thả lỏng và nghỉ ngơi không?</label>
                     <select id="surveyRelaxed" class="form-control">
-                      <option value="1">1 - Never</option>
-                      <option value="2">2 - Rarely</option>
-                      <option value="3">3 - Sometimes</option>
-                      <option value="4" selected>4 - Often</option>
-                      <option value="5">5 - Almost always</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3">3</option>
+                      <option value="4" selected>4</option>
+                      <option value="5">5</option>
                     </select>
                   </div>
 
+                  <!-- NEW: Emotional Journal -->
                   <div class="form-group">
-                    <label>Personal Reflection Notes (Optional)</label>
-                    <textarea id="moodNotes" class="form-control" placeholder="Is there anything bothering you or something you feel grateful for today?"></textarea>
+                    <label style="font-weight: 800; color: var(--primary);" data-i18n="emotionalJournalTitle">📖 Nhật Ký Cảm Xúc (Emotional Journal)</label>
+                    <textarea id="moodJournalEntry" class="form-control" style="min-height: 90px;" placeholder="Hãy viết ra những suy nghĩ, điều bạn biết ơn hoặc điều đang trăn trở hôm nay..."></textarea>
                   </div>
 
-                  <button type="submit" class="btn btn-primary" style="width: 100%;">Record Emotional Reflection</button>
+                  <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="recordMoodBtn">Lưu Phản Chiếu Cảm Xúc</button>
                 </form>
 
                 <!-- Psychological Disclaimer Requirement -->
                 <div class="wellness-support-box">
-                  <strong>💙 Ethical Mental Wellness Boundary:</strong>
-                  This feature is designed for general emotional self-reflection and personal wellness support. We do not use numerical scores to diagnose mental health disorders. If you are experiencing intense distress or thoughts of self-harm, please reach out to emergency services (e.g. 988 Lifeline) or a licensed mental health professional immediately.
+                  <div data-i18n="mentalDisclaimer">
+                    Cam kết an toàn: Tính năng này chỉ dùng để tự chiêm nghiệm, không dùng điểm số để gán nhãn hay chẩn đoán rối loạn tâm lý. Nếu bạn đang rơi vào khủng hoảng hoặc có ý nghĩ tiêu cực, hãy gọi ngay đường dây nóng khẩn cấp 1900 9095 hoặc 115.
+                  </div>
                 </div>
               </div>
             </div>
 
             <div class="col-5">
+              <!-- Supportive Message -->
               <div class="card" style="margin-bottom: 20px;">
-                <h3 class="card-title">Supportive Message for You</h3>
+                <h3 class="card-title" data-i18n="supportiveThoughtTitle">Thông Điệp Chữa Lành Dành Cho Bạn</h3>
                 <div id="dynamicSupportBox" style="font-size: 0.95rem; line-height: 1.6; color: var(--text-heading); background: var(--primary-light); padding: 18px; border-radius: var(--radius-md);">
-                  "Remember: It is okay to take pause. Productivity without inner calm is unsustainable."
+                  "Hãy cho phép bản thân nghỉ ngơi. Sự cân bằng và an yên nội tại quan trọng hơn mọi sự hối hả."
                 </div>
               </div>
 
+              <!-- NEW: Mood Calendar Mini Grid -->
+              <div class="card" style="margin-bottom: 20px;">
+                <h3 class="card-title" data-i18n="moodCalendarTitle">Lịch Cảm Xúc (Mood Calendar)</h3>
+                <div id="moodCalendarContainer">
+                  <!-- Injected via JS -->
+                </div>
+              </div>
+
+              <!-- Emotional Journal & Reflection History -->
               <div class="card">
-                <h3 class="card-title">Recent Mood History</h3>
+                <h3 class="card-title" data-i18n="weeklyEmotionalSummary">Lịch Sử Cảm Xúc & Nhật Ký</h3>
                 <div id="moodHistoryList">
                   <!-- Injected via JS -->
                 </div>
@@ -669,21 +722,21 @@
         </section>
 
         <!-- ============================================== -->
-        <!-- VIEW 5: PERSONAL HEALTH TIMELINE (Feature #3) -->
+        <!-- VIEW 5: PERSONAL HEALTH TIMELINE -->
         <!-- ============================================== -->
         <section class="view-section" id="view-timeline">
           <div class="card" style="margin-bottom: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
               <div>
-                <h3 class="card-title" style="margin-bottom: 4px;">Personal Health Timeline</h3>
-                <p style="font-size: 0.85rem; color: var(--text-muted);">
-                  Reflect on days when you felt energized, stressed, well-rested, and accomplished.
+                <h3 class="card-title" style="margin-bottom: 4px;" data-i18n="healthTimeline">Dòng Thời Gian Sức Khỏe Cá Nhân</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted);" data-i18n="timelineDesc">
+                  Nhìn lại những ngày tràn đầy năng lượng, ngày vượt qua áp lực và những thói quen tích cực.
                 </p>
               </div>
               <div class="calendar-view-tabs">
-                <button class="view-tab-btn active" data-timeline-range="30days">Last 30 Days</button>
-                <button class="view-tab-btn" data-timeline-range="7days">Last 7 Days</button>
-                <button class="view-tab-btn" data-timeline-range="year">Full Year</button>
+                <button class="view-tab-btn active" data-timeline-range="30days" data-i18n="last30Days">30 Ngày Qua</button>
+                <button class="view-tab-btn" data-timeline-range="7days" data-i18n="last7Days">7 Ngày Qua</button>
+                <button class="view-tab-btn" data-timeline-range="year" data-i18n="fullYear">Cả Năm</button>
               </div>
             </div>
           </div>
@@ -697,21 +750,33 @@
         <!-- VIEW 6: STATISTICS & PERSONAL REPORTS -->
         <!-- ============================================== -->
         <section class="view-section" id="view-statistics">
-          <!-- Feature 5: Generated Weekly Report Showcase -->
+          <!-- Filter Controls -->
+          <div class="card" style="margin-bottom: 20px;">
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+              <span style="font-weight: 700; font-size: 0.9rem;" data-i18n="filterFrom">Từ ngày:</span>
+              <input type="date" id="statsStartDate" class="form-control" style="width: 160px; padding: 6px 10px;" />
+              <span style="font-weight: 700; font-size: 0.9rem;" data-i18n="filterTo">Đến ngày:</span>
+              <input type="date" id="statsEndDate" class="form-control" style="width: 160px; padding: 6px 10px;" />
+              <button class="btn btn-primary" id="btnApplyStatsFilter" style="padding: 6px 16px;" data-i18n="applyFilter">Lọc Dữ Liệu</button>
+              <button class="btn btn-secondary" id="btnResetStatsFilter" style="padding: 6px 12px;">7 ngày gần nhất</button>
+            </div>
+          </div>
+
+          <!-- Weekly Report Showcase -->
           <div class="welcome-hero" style="margin-bottom: 24px; background: linear-gradient(135deg, #EEF4FD 0%, #F0F9F4 100%);">
             <div>
-              <h3 style="font-size: 1.3rem; font-weight: 800; color: var(--text-heading); margin-bottom: 6px;">Your Automated Weekly Personal Report 📊</h3>
+              <h3 style="font-size: 1.3rem; font-weight: 800; color: var(--text-heading); margin-bottom: 6px;" data-i18n="weeklyReportTitle">Báo Cáo Tự Động Định Kỳ 📊</h3>
               <p id="weeklyReportSummaryText" style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.6;">
-                Loading your weekly progress overview...
+                Đang tổng hợp báo cáo tuần của bạn...
               </p>
             </div>
-            <button class="btn btn-primary" id="btnRefreshWeeklyReport">Regenerate Report</button>
+            <button class="btn btn-primary" id="btnRefreshWeeklyReport" data-i18n="regenerateReport">Làm Mới Báo Cáo</button>
           </div>
 
           <div class="dashboard-grid" style="margin-bottom: 24px;">
             <div class="col-6">
               <div class="card">
-                <h3 class="card-title">Task Productivity by Category</h3>
+                <h3 class="card-title" data-i18n="productivityByCategory">Năng Suất Theo Danh Mục</h3>
                 <div style="height: 260px; position: relative;">
                   <canvas id="categoryChart"></canvas>
                 </div>
@@ -720,7 +785,7 @@
 
             <div class="col-6">
               <div class="card">
-                <h3 class="card-title">Weekly Mood Distribution</h3>
+                <h3 class="card-title" data-i18n="weeklyMoodDistribution">Phân Bố Cảm Xúc</h3>
                 <div style="height: 260px; position: relative;">
                   <canvas id="moodChart"></canvas>
                 </div>
@@ -729,7 +794,7 @@
 
             <div class="col-6">
               <div class="card">
-                <h3 class="card-title">Sleep Duration Trends (Hours)</h3>
+                <h3 class="card-title" data-i18n="sleepDurationTrends">Xu Hướng Giấc Ngủ (Giờ)</h3>
                 <div style="height: 260px; position: relative;">
                   <canvas id="sleepChart"></canvas>
                 </div>
@@ -738,7 +803,7 @@
 
             <div class="col-6">
               <div class="card">
-                <h3 class="card-title">Stress & Motivation Trend</h3>
+                <h3 class="card-title" data-i18n="stressMotivationTrends">Chỉ Số Căng Thẳng & Động Lực</h3>
                 <div style="height: 260px; position: relative;">
                   <canvas id="stressChart"></canvas>
                 </div>
@@ -755,52 +820,52 @@
             <div class="col-6">
               <!-- Edit Profile -->
               <div class="card" style="margin-bottom: 24px;">
-                <h3 class="card-title">User Profile Management</h3>
+                <h3 class="card-title" data-i18n="profileMgmt">Quản Lý Thông Tin Cá Nhân</h3>
                 <form id="profileForm">
                   <div class="form-group">
-                    <label>Full Name</label>
+                    <label data-i18n="fullName">Họ và tên</label>
                     <input type="text" id="profFullName" class="form-control" required />
                   </div>
                   <div class="form-group">
-                    <label>Email Address</label>
+                    <label data-i18n="email">Địa chỉ Email</label>
                     <input type="email" id="profEmail" class="form-control" disabled style="opacity: 0.7; cursor: not-allowed;" />
                   </div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label>Date of Birth</label>
+                      <label data-i18n="dob">Ngày sinh</label>
                       <input type="date" id="profDob" class="form-control" />
                     </div>
                     <div class="form-group">
-                      <label>Gender</label>
+                      <label data-i18n="gender">Giới tính</label>
                       <select id="profGender" class="form-control">
-                        <option value="">Prefer not to say</option>
-                        <option value="Female">Female</option>
-                        <option value="Male">Male</option>
-                        <option value="Non-binary / Other">Non-binary / Other</option>
+                        <option value="" data-i18n="preferNotToSay">Không muốn tiết lộ</option>
+                        <option value="Female" data-i18n="female">Nữ</option>
+                        <option value="Male" data-i18n="male">Nam</option>
+                        <option value="Non-binary / Other" data-i18n="nonBinary">Khác</option>
                       </select>
                     </div>
                   </div>
                   <div class="form-group">
-                    <label>Personal Wellness Goals</label>
-                    <textarea id="profGoals" class="form-control" placeholder="Describe your health and work balance priorities..."></textarea>
+                    <label data-i18n="goals">Mục tiêu sức khỏe cá nhân</label>
+                    <textarea id="profGoals" class="form-control" placeholder="Mô tả mục tiêu của bạn..."></textarea>
                   </div>
-                  <button type="submit" class="btn btn-primary">Update Profile</button>
+                  <button type="submit" class="btn btn-primary" data-i18n="updateProfile">Cập Nhật Hồ Sơ</button>
                 </form>
               </div>
 
               <!-- Change Password -->
               <div class="card">
-                <h3 class="card-title">Change Password</h3>
+                <h3 class="card-title" data-i18n="changePassword">Đổi Mật Khẩu</h3>
                 <form id="changePasswordForm">
                   <div class="form-group">
-                    <label>Current Password</label>
+                    <label data-i18n="currentPassword">Mật khẩu hiện tại</label>
                     <input type="password" id="curPassword" class="form-control" required />
                   </div>
                   <div class="form-group">
-                    <label>New Password</label>
+                    <label data-i18n="newPassword">Mật khẩu mới</label>
                     <input type="password" id="newPassword" class="form-control" minlength="6" required />
                   </div>
-                  <button type="submit" class="btn btn-secondary">Update Password</button>
+                  <button type="submit" class="btn btn-secondary" data-i18n="updatePasswordBtn">Lưu Mật Khẩu</button>
                 </form>
               </div>
             </div>
@@ -808,66 +873,74 @@
             <div class="col-6">
               <!-- Notification Preferences -->
               <div class="card" style="margin-bottom: 24px;">
-                <h3 class="card-title">Notification & Habit Reminders</h3>
+                <h3 class="card-title" data-i18n="remindersSettings">Tùy Chọn Thông Báo & Nhắc Thói Quen</h3>
                 <form id="settingsForm">
                   <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
-                      <input type="checkbox" id="setRemindWater" checked /> Hydration reminders (Drink water regularly)
+                      <input type="checkbox" id="setRemindWater" checked /> <span data-i18n="remindWaterCheck">Nhắc nhở uống nước đều đặn</span>
                     </label>
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
-                      <input type="checkbox" id="setRemindBreak" checked /> Screen & movement breaks
+                      <input type="checkbox" id="setRemindBreak" checked /> <span data-i18n="remindBreakCheck">Nhắc nghỉ mắt và duỗi cơ vận động</span>
                     </label>
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
-                      <input type="checkbox" id="setRemindHealth" checked /> Daily physical check-in reminder
+                      <input type="checkbox" id="setRemindHealth" checked /> <span data-i18n="remindHealthCheck">Nhắc điểm danh thể chất hằng ngày</span>
                     </label>
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
-                      <input type="checkbox" id="setRemindMood" checked /> Daily mood reflection prompt
+                      <input type="checkbox" id="setRemindMood" checked /> <span data-i18n="remindMoodCheck">Nhắc phản chiếu cảm xúc hằng ngày</span>
                     </label>
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
-                      <input type="checkbox" id="setRemindTasks" checked /> Upcoming task & schedule notifications
+                      <input type="checkbox" id="setRemindTasks" checked /> <span data-i18n="remindTasksCheck">Thông báo lịch trình và hạn công việc</span>
                     </label>
                   </div>
 
                   <div class="form-row">
                     <div class="form-group">
-                      <label>Quiet Hours Start</label>
+                      <label data-i18n="quietHoursStart">Bắt đầu giờ yên tĩnh</label>
                       <input type="time" id="setQuietStart" class="form-control" value="22:00" />
                     </div>
                     <div class="form-group">
-                      <label>Quiet Hours End</label>
+                      <label data-i18n="quietHoursEnd">Kết thúc giờ yên tĩnh</label>
                       <input type="time" id="setQuietEnd" class="form-control" value="07:00" />
                     </div>
                   </div>
 
                   <div class="form-group">
-                    <label>Notification Frequency</label>
+                    <label data-i18n="notificationFreq">Tần suất thông báo</label>
                     <select id="setFrequency" class="form-control">
-                      <option value="minimal">Minimal (Only urgent events)</option>
-                      <option value="normal" selected>Normal (Mindful habit cadence)</option>
-                      <option value="frequent">Frequent (Active reminders)</option>
+                      <option value="minimal" data-i18n="freqMinimal">Tối thiểu (Chỉ việc quan trọng)</option>
+                      <option value="normal" selected data-i18n="freqNormal">Vừa phải (Theo nhịp sinh học)</option>
+                      <option value="frequent" data-i18n="freqFrequent">Thường xuyên</option>
                     </select>
                   </div>
 
-                  <button type="submit" class="btn btn-primary">Save Reminder Preferences</button>
+                  <div class="form-group">
+                    <label data-i18n="languagePreference">Ngôn Ngữ Ứng Dụng</label>
+                    <select id="setLanguage" class="form-control">
+                      <option value="vi" data-i18n="langVietnamese">Tiếng Việt (Mặc định)</option>
+                      <option value="en" data-i18n="langEnglish">English</option>
+                    </select>
+                  </div>
+
+                  <button type="submit" class="btn btn-primary" data-i18n="saveSettingsBtn">Lưu Tùy Chọn</button>
                 </form>
               </div>
 
               <!-- Data Privacy, Export & Danger Zone -->
               <div class="card">
-                <h3 class="card-title">Data Privacy & Security</h3>
-                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;">
-                  Your health and mood records belong strictly to you. LifeCare never sells data or displays commercial advertisements.
+                <h3 class="card-title" data-i18n="privacyHeader">Bảo Mật Dữ Liệu & Quyền Riêng Tư</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;" data-i18n="privacyDesc">
+                  Dữ liệu thể chất và cảm xúc thuộc toàn quyền sở hữu của bạn. LifeCare cam kết không thương mại hóa dữ liệu cá nhân.
                 </p>
                 <div style="display: flex; flex-direction: column; gap: 12px;">
                   <button class="btn btn-secondary" id="btnExportData">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    <span>Export All Personal Data (JSON)</span>
+                    <span data-i18n="exportJson">Xuất Toàn Bộ Dữ Liệu (JSON)</span>
                   </button>
                   <button class="btn btn-secondary" id="btnClearHealthHistory" style="color: #DC2626;">
-                    <span>Clear Health & Mood History</span>
+                    <span data-i18n="clearHistory">Xóa Toàn Bộ Lịch Sử Sức Khỏe & Tâm Trạng</span>
                   </button>
                   <button class="btn btn-secondary" id="btnDeleteAccount" style="color: #991B1B;">
-                    <span>Delete Account Permanently</span>
+                    <span data-i18n="deleteAccount">Xóa Vĩnh Viễn Tài Khoản</span>
                   </button>
                 </div>
               </div>
@@ -882,57 +955,72 @@
   <div class="modal-overlay" id="taskModal">
     <div class="modal-content">
       <div class="modal-header">
-        <h3 id="taskModalTitle">Create Task or Event</h3>
+        <h3 id="taskModalTitle" data-i18n="createTaskEvent">Tạo Công Việc hoặc Sự Kiện</h3>
         <button class="modal-close" id="taskModalClose">✕</button>
       </div>
       <form id="taskForm">
         <input type="hidden" id="taskIdInput" />
         <div class="form-group">
-          <label>Task Title</label>
-          <input type="text" id="taskTitle" class="form-control" placeholder="e.g. Research Literature Review" required />
+          <label data-i18n="taskTitle">Tiêu đề công việc</label>
+          <input type="text" id="taskTitle" class="form-control" placeholder="e.g. Ôn tập nghiên cứu khoa học" required />
         </div>
         <div class="form-group">
-          <label>Description</label>
-          <textarea id="taskDesc" class="form-control" placeholder="Add specific notes or goals..."></textarea>
+          <label data-i18n="taskDesc">Mô tả</label>
+          <textarea id="taskDesc" class="form-control" placeholder="Ghi chú chi tiết mục tiêu..."></textarea>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Category</label>
+            <label data-i18n="category">Danh mục</label>
             <select id="taskCategory" class="form-control" required>
-              <option value="Study">Study</option>
-              <option value="Work">Work</option>
-              <option value="Exercise">Exercise</option>
-              <option value="Personal">Personal</option>
-              <option value="Rest">Rest</option>
-              <option value="Other">Other</option>
+              <option value="Study" data-i18n="categoryStudy">Học tập</option>
+              <option value="Work" data-i18n="categoryWork">Công việc</option>
+              <option value="Exercise" data-i18n="categoryExercise">Thể thao</option>
+              <option value="Personal" data-i18n="categoryPersonal">Cá nhân</option>
+              <option value="Rest" data-i18n="categoryRest">Nghỉ ngơi</option>
+              <option value="Other" data-i18n="categoryOther">Khác</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Priority</label>
+            <label data-i18n="priority">Mức ưu tiên</label>
             <select id="taskPriority" class="form-control">
-              <option value="low">Low</option>
-              <option value="medium" selected>Medium</option>
-              <option value="high">High</option>
+              <option value="low" data-i18n="priorityLow">Thấp</option>
+              <option value="medium" selected data-i18n="priorityMedium">Trung bình</option>
+              <option value="high" data-i18n="priorityHigh">Cao</option>
             </select>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Date</label>
+            <label data-i18n="date">Ngày</label>
             <input type="date" id="taskDate" class="form-control" required />
           </div>
           <div class="form-group">
-            <label>Start Time</label>
+            <label data-i18n="startTime">Giờ bắt đầu</label>
             <input type="time" id="taskStartTime" class="form-control" />
           </div>
           <div class="form-group">
-            <label>End Time</label>
+            <label data-i18n="endTime">Giờ kết thúc</label>
             <input type="time" id="taskEndTime" class="form-control" />
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label data-i18n="recurring">Lặp lại định kỳ</label>
+            <select id="taskRecurring" class="form-control">
+              <option value="none" data-i18n="recurringNone">Không lặp lại</option>
+              <option value="daily" data-i18n="recurringDaily">Hằng ngày</option>
+              <option value="weekly" data-i18n="recurringWeekly">Hằng tuần</option>
+              <option value="monthly" data-i18n="recurringMonthly">Hằng tháng</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label data-i18n="reminderTime">Giờ nhắc nhở</label>
+            <input type="time" id="taskReminderTime" class="form-control" />
+          </div>
+        </div>
         <div style="display: flex; gap: 10px; margin-top: 10px;">
-          <button type="submit" class="btn btn-primary" style="flex: 1;">Save Task</button>
-          <button type="button" class="btn btn-secondary" id="taskModalCancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="flex: 1;" data-i18n="saveTask">Lưu Công Việc</button>
+          <button type="button" class="btn btn-secondary" id="taskModalCancel" data-i18n="cancel">Hủy</button>
         </div>
       </form>
     </div>
@@ -943,62 +1031,72 @@
     <div class="modal-content" style="max-width: 480px;">
       <div class="modal-header">
         <div>
-          <h3>⚡ 30-Second Daily Check-in</h3>
-          <p style="font-size: 0.8rem; color: var(--text-muted);">Quick morning or evening pulse</p>
+          <h3>⚡ Điểm Danh Nhanh Thân - Tâm 30 Giây</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">Khảo sát ngắn gọn buổi sáng hoặc tối</p>
         </div>
         <button class="modal-close" id="rapidModalClose">✕</button>
       </div>
       <form id="rapidCheckinForm">
         <div class="form-group">
-          <label>1. How are you feeling right now?</label>
+          <label>1. Tâm trạng của bạn ngay lúc này?</label>
           <select id="rapidMood" class="form-control">
-            <option value="Happy">😊 Happy</option>
-            <option value="Relaxed" selected>😌 Relaxed</option>
-            <option value="Excited">✨ Excited</option>
-            <option value="Normal">🙂 Normal</option>
-            <option value="Tired">🥱 Tired</option>
-            <option value="Stressed">😣 Stressed</option>
+            <option value="Happy">😊 Vui vẻ</option>
+            <option value="Relaxed" selected>😌 Thư thái</option>
+            <option value="Excited">✨ Hào hứng</option>
+            <option value="Normal">🙂 Bình thường</option>
+            <option value="Tired">🥱 Mệt mỏi</option>
+            <option value="Stressed">😣 Căng thẳng</option>
           </select>
         </div>
         <div class="form-group">
-          <label>2. Did you sleep well?</label>
+          <label>2. Đêm qua bạn ngủ thế nào?</label>
           <select id="rapidSleep" class="form-control">
-            <option value="7.5">Yes, full restful night (~7.5h)</option>
-            <option value="6.0">Average sleep (~6h)</option>
-            <option value="5.0">Restless or short (~5h)</option>
-            <option value="8.5">Very deep long sleep (~8.5h)</option>
+            <option value="7.5">Ngủ ngon và đủ giấc (~7.5h)</option>
+            <option value="6.0">Tương đối (~6h)</option>
+            <option value="5.0">Chập chờn hoặc thiếu ngủ (~5h)</option>
+            <option value="8.5">Ngủ sâu và thư thái (~8.5h)</option>
           </select>
         </div>
         <div class="form-group">
-          <label>3. Feeling under any pressing stress today?</label>
+          <label>3. Bạn có đang chịu áp lực lớn nào không?</label>
           <select id="rapidStress" class="form-control">
-            <option value="1">1 - Not stressed at all</option>
-            <option value="2" selected>2 - Mild, manageable</option>
-            <option value="3">3 - Moderate tension</option>
-            <option value="4">4 - High pressure</option>
+            <option value="1">1 - Rất thoải mái, không áp lực</option>
+            <option value="2" selected>2 - Áp lực nhẹ, kiểm soát tốt</option>
+            <option value="3">3 - Hơi căng thẳng</option>
+            <option value="4">4 - Khá nhiều áp lực</option>
           </select>
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Complete 30s Check-in</button>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Hoàn Thành Trong 30 Giây</button>
       </form>
     </div>
   </div>
 
-  <!-- FEATURE 2: AI WELLNESS ASSISTANT CHAT DRAWER -->
+  <!-- AI WELLNESS ASSISTANT CHAT DRAWER -->
   <div class="ai-chat-drawer" id="aiChatDrawer">
     <div class="ai-header">
       <h4>
-        <span>✨</span> LifeCare AI Wellness Assistant
+        <span>✨</span> <span data-i18n="aiModalTitle">Trợ Lý Sức Khỏe LifeCare AI</span>
       </h4>
       <button class="btn-icon" id="closeAiDrawerBtn" style="background: transparent; border: none; color: #fff;">✕</button>
     </div>
+    
+    <!-- AI Mode Switcher Tabs -->
+    <div style="padding: 10px 14px 0 14px;">
+      <div class="ai-mode-tabs" id="aiModeTabs">
+        <button class="ai-mode-btn" data-ai-mode="schedule">🗓️ Lịch Trình</button>
+        <button class="ai-mode-btn" data-ai-mode="wellness">🌿 Thư Giãn</button>
+        <button class="ai-mode-btn" data-ai-mode="insight">📊 Góc Nhìn</button>
+      </div>
+    </div>
+
     <div class="ai-messages-area" id="aiChatMessages">
       <div class="chat-msg assistant">
-        Hello Alex! I am your mindful wellness companion. I can help you balance high-focus work sessions, suggest restorative breaks, or review your schedule. How can I help you today?
+        Xin chào! Tôi là Trợ lý AI LifeCare. Tôi có thể giúp bạn cân bằng lịch trình, hướng dẫn bài tập thở thư giãn, hoặc phân tích xu hướng sức khỏe từ dữ liệu bạn ghi nhận. Bạn cần tôi hỗ trợ điều gì hôm nay?
       </div>
     </div>
     <form class="ai-chat-input-bar" id="aiChatForm">
-      <input type="text" id="aiChatInput" class="form-control" placeholder="Ask for advice or schedule check..." autocomplete="off" />
-      <button type="submit" class="btn btn-primary" style="padding: 0 16px;">Send</button>
+      <input type="text" id="aiChatInput" class="form-control" placeholder="Nhập câu hỏi hoặc chọn chế độ ở trên..." autocomplete="off" />
+      <button type="submit" class="btn btn-primary" style="padding: 0 16px;" data-i18n="send">Gửi</button>
     </form>
   </div>
 
@@ -1006,7 +1104,7 @@
   <div class="modal-overlay" id="notifModal">
     <div class="modal-content" style="max-width: 440px;">
       <div class="modal-header">
-        <h3>🔔 Habit & Schedule Reminders</h3>
+        <h3 data-i18n="remindersSettings">🔔 Lời Nhắc Thói Quen & Lịch Trình</h3>
         <button class="modal-close" id="notifModalClose">✕</button>
       </div>
       <div id="notifListContainer" style="display: flex; flex-direction: column; gap: 10px;">
@@ -1018,7 +1116,8 @@
   <!-- TOAST NOTIFICATION CONTAINER -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <!-- APP SCRIPTS -->
+  <!-- SCRIPTS -->
+  <script src="/js/i18n.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

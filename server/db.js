@@ -40,7 +40,7 @@ function initDatabase() {
       id TEXT PRIMARY KEY,
       user_id TEXT UNIQUE NOT NULL,
       theme TEXT DEFAULT 'light',
-      language TEXT DEFAULT 'en',
+      language TEXT DEFAULT 'vi',
       quiet_hours_start TEXT DEFAULT '22:00',
       quiet_hours_end TEXT DEFAULT '07:00',
       remind_water INTEGER DEFAULT 1,
@@ -67,6 +67,7 @@ function initDatabase() {
       status TEXT DEFAULT 'pending', -- 'pending', 'completed'
       is_event INTEGER DEFAULT 0,
       reminder_time TEXT,
+      recurring TEXT DEFAULT 'none', -- 'none', 'daily', 'weekly', 'monthly'
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -82,7 +83,10 @@ function initDatabase() {
       physical_condition TEXT, -- 'Very Good', 'Good', 'Normal', 'Tired', 'Unwell'
       energy_level INTEGER, -- 1 to 5
       exercise_status TEXT, -- 'Yes', 'No'
-      water_intake REAL, -- in liters or ml
+      exercise_type TEXT, -- 'running', 'yoga', 'gym', 'walking', 'cycling', 'other'
+      exercise_duration INTEGER DEFAULT 0, -- in minutes
+      meals_summary TEXT, -- e.g. 'Breakfast: oatmeal, Lunch: salad, Dinner: fish'
+      water_intake REAL, -- in liters
       discomfort TEXT,
       notes TEXT,
       created_at TEXT NOT NULL,
@@ -102,6 +106,7 @@ function initDatabase() {
       relaxed_score INTEGER, -- 1 to 5
       anxiety_score INTEGER, -- 1 to 5
       emotional_notes TEXT,
+      journal_entry TEXT, -- Detailed personal emotional journal reflection
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -156,7 +161,40 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   `);
 
+  // Run dynamic schema migrations for existing databases
+  runMigrations(db);
+
   return db;
+}
+
+function runMigrations(db) {
+  try {
+    // Migration for tasks: recurring
+    const taskCols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
+    if (!taskCols.includes('recurring')) {
+      db.exec("ALTER TABLE tasks ADD COLUMN recurring TEXT DEFAULT 'none'");
+    }
+
+    // Migration for health_checkins: exercise_type, exercise_duration, meals_summary
+    const healthCols = db.prepare("PRAGMA table_info(health_checkins)").all().map(c => c.name);
+    if (!healthCols.includes('exercise_type')) {
+      db.exec("ALTER TABLE health_checkins ADD COLUMN exercise_type TEXT");
+    }
+    if (!healthCols.includes('exercise_duration')) {
+      db.exec("ALTER TABLE health_checkins ADD COLUMN exercise_duration INTEGER DEFAULT 0");
+    }
+    if (!healthCols.includes('meals_summary')) {
+      db.exec("ALTER TABLE health_checkins ADD COLUMN meals_summary TEXT");
+    }
+
+    // Migration for mood_checkins: journal_entry
+    const moodCols = db.prepare("PRAGMA table_info(mood_checkins)").all().map(c => c.name);
+    if (!moodCols.includes('journal_entry')) {
+      db.exec("ALTER TABLE mood_checkins ADD COLUMN journal_entry TEXT");
+    }
+  } catch (err) {
+    console.error('Database migration note:', err.message);
+  }
 }
 
 let _dbInstance = null;

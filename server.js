@@ -409,13 +409,16 @@ async function handleRequest(req, res) {
         const user = getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const { date, month, category, priority, search, status } = parsedUrl.query;
+        const { date, month, startDate, endDate, category, priority, search, status } = parsedUrl.query;
         let query = 'SELECT * FROM tasks WHERE user_id = ?';
         const params = [user.id];
 
         if (date) {
           query += ' AND date = ?';
           params.push(date);
+        } else if (startDate && endDate) {
+          query += ' AND date >= ? AND date <= ?';
+          params.push(startDate, endDate);
         } else if (month) {
           // 'YYYY-MM'
           query += ' AND date LIKE ?';
@@ -445,7 +448,20 @@ async function handleRequest(req, res) {
         query += ' ORDER BY date ASC, start_time ASC';
         const tasks = db.prepare(query).all(...params);
 
-        return sendJSON(res, 200, { success: true, tasks });
+        // Check for schedule overlaps
+        const overlaps = [];
+        const timedTasks = tasks.filter(t => t.start_time && t.end_time);
+        for (let i = 0; i < timedTasks.length; i++) {
+          for (let j = i + 1; j < timedTasks.length; j++) {
+            const a = timedTasks[i];
+            const b = timedTasks[j];
+            if (a.date === b.date && a.start_time < b.end_time && a.end_time > b.start_time) {
+              overlaps.push({ task1Id: a.id, task2Id: b.id, task1Title: a.title, task2Title: b.title, date: a.date });
+            }
+          }
+        }
+
+        return sendJSON(res, 200, { success: true, tasks, overlaps });
       }
 
       // POST /api/tasks
@@ -454,18 +470,30 @@ async function handleRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
-        const { title, description, category, priority, date, start_time, end_time, is_event, reminder_time } = body;
+        const { title, description, category, priority, date, start_time, end_time, is_event, reminder_time, recurring } = body;
 
         if (!title || !category || !date) {
           return sendJSON(res, 400, { success: false, message: 'Title, category, and date are required.' });
+        }
+
+        // Detect overlapping schedule with existing tasks on same date
+        let overlapWarning = null;
+        if (start_time && end_time) {
+          const sameDayTasks = db.prepare('SELECT id, title, start_time, end_time FROM tasks WHERE user_id = ? AND date = ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(user.id, date);
+          for (const t of sameDayTasks) {
+            if (start_time < t.end_time && end_time > t.start_time) {
+              overlapWarning = `Schedule overlap detected with "${t.title}" (${t.start_time} - ${t.end_time})`;
+              break;
+            }
+          }
         }
 
         const taskId = 'task_' + crypto.randomUUID();
         const now = new Date().toISOString();
 
         db.prepare(`
-          INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+          INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, recurring, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
         `).run(
           taskId,
           user.id,
@@ -478,12 +506,21 @@ async function handleRequest(req, res) {
           end_time || null,
           is_event ? 1 : 0,
           reminder_time || null,
+          recurring || 'none',
           now,
           now
         );
 
+        // If reminder_time is provided, create a reminder notification
+        if (reminder_time) {
+          db.prepare(`
+            INSERT INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
+            VALUES (?, ?, ?, ?, 'schedule', ?, 0, 1, ?)
+          `).run('notif_' + crypto.randomUUID(), user.id, `Reminder: ${title.trim()}`, `Scheduled at ${start_time || date}. Don't forget!`, reminder_time, now);
+        }
+
         const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
-        return sendJSON(res, 201, { success: true, message: 'Task created successfully.', task: created });
+        return sendJSON(res, 201, { success: true, message: 'Task created successfully.', task: created, overlapWarning });
       }
 
       // PUT /api/tasks/:id
@@ -512,6 +549,7 @@ async function handleRequest(req, res) {
               status = COALESCE(?, status),
               is_event = COALESCE(?, is_event),
               reminder_time = COALESCE(?, reminder_time),
+              recurring = COALESCE(?, recurring),
               updated_at = ?
           WHERE id = ? AND user_id = ?
         `).run(
@@ -519,6 +557,7 @@ async function handleRequest(req, res) {
           body.date, body.start_time, body.end_time, body.status,
           body.is_event !== undefined ? (body.is_event ? 1 : 0) : null,
           body.reminder_time,
+          body.recurring,
           now,
           taskId,
           user.id
@@ -562,7 +601,44 @@ async function handleRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
-        const { checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_intake, discomfort, notes } = body;
+        let { checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_intake, discomfort, notes } = body;
+
+        // Numerical input validation
+        if (sleep_duration !== undefined && sleep_duration !== null && sleep_duration !== '') {
+          sleep_duration = parseFloat(sleep_duration);
+          if (isNaN(sleep_duration) || sleep_duration < 0 || sleep_duration > 24) {
+            return sendJSON(res, 400, { success: false, message: 'Sleep duration must be a valid number between 0 and 24 hours.' });
+          }
+        } else {
+          sleep_duration = null;
+        }
+
+        if (water_intake !== undefined && water_intake !== null && water_intake !== '') {
+          water_intake = parseFloat(water_intake);
+          if (isNaN(water_intake) || water_intake < 0 || water_intake > 20) {
+            return sendJSON(res, 400, { success: false, message: 'Water intake must be a valid number between 0 and 20 liters.' });
+          }
+        } else {
+          water_intake = null;
+        }
+
+        if (energy_level !== undefined && energy_level !== null && energy_level !== '') {
+          energy_level = parseInt(energy_level);
+          if (isNaN(energy_level) || energy_level < 1 || energy_level > 5) {
+            return sendJSON(res, 400, { success: false, message: 'Energy level must be an integer between 1 and 5.' });
+          }
+        } else {
+          energy_level = null;
+        }
+
+        if (exercise_duration !== undefined && exercise_duration !== null && exercise_duration !== '') {
+          exercise_duration = parseInt(exercise_duration);
+          if (isNaN(exercise_duration) || exercise_duration < 0 || exercise_duration > 1440) {
+            return sendJSON(res, 400, { success: false, message: 'Exercise duration must be between 0 and 1440 minutes.' });
+          }
+        } else {
+          exercise_duration = 0;
+        }
 
         const date = checkin_date || new Date().toISOString().split('T')[0];
         const existing = db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
@@ -573,15 +649,18 @@ async function handleRequest(req, res) {
         if (existing) {
           db.prepare(`
             UPDATE health_checkins
-            SET sleep_duration = ?, sleep_quality = ?, physical_condition = ?, energy_level = ?, exercise_status = ?, water_intake = ?, discomfort = ?, notes = ?
+            SET sleep_duration = ?, sleep_quality = ?, physical_condition = ?, energy_level = ?, exercise_status = ?, exercise_type = ?, exercise_duration = ?, meals_summary = ?, water_intake = ?, discomfort = ?, notes = ?
             WHERE id = ? AND user_id = ?
           `).run(
-            sleep_duration !== undefined ? sleep_duration : null,
+            sleep_duration,
             sleep_quality || null,
             physical_condition || null,
-            energy_level !== undefined ? energy_level : null,
+            energy_level,
             exercise_status || null,
-            water_intake !== undefined ? water_intake : null,
+            exercise_type || null,
+            exercise_duration,
+            meals_summary || null,
+            water_intake,
             discomfort || null,
             notes || null,
             id,
@@ -589,18 +668,21 @@ async function handleRequest(req, res) {
           );
         } else {
           db.prepare(`
-            INSERT INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_intake, discomfort, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_intake, discomfort, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             id,
             user.id,
             date,
-            sleep_duration !== undefined ? sleep_duration : null,
+            sleep_duration,
             sleep_quality || null,
             physical_condition || null,
-            energy_level !== undefined ? energy_level : null,
+            energy_level,
             exercise_status || null,
-            water_intake !== undefined ? water_intake : null,
+            exercise_type || null,
+            exercise_duration,
+            meals_summary || null,
+            water_intake,
             discomfort || null,
             notes || null,
             now
@@ -637,7 +719,7 @@ async function handleRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
-        const { checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes } = body;
+        const { checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes, journal_entry } = body;
 
         if (!mood) {
           return sendJSON(res, 400, { success: false, message: 'Mood selection is required.' });
@@ -652,31 +734,31 @@ async function handleRequest(req, res) {
         if (existing) {
           db.prepare(`
             UPDATE mood_checkins
-            SET mood = ?, emoji = ?, stress_level = ?, motivation_level = ?, connected_score = ?, relaxed_score = ?, anxiety_score = ?, emotional_notes = ?
+            SET mood = ?, emoji = ?, stress_level = ?, motivation_level = ?, connected_score = ?, relaxed_score = ?, anxiety_score = ?, emotional_notes = ?, journal_entry = ?
             WHERE id = ? AND user_id = ?
           `).run(
             mood, emoji || null, stress_level || null, motivation_level || null,
             connected_score || null, relaxed_score || null, anxiety_score || null,
-            emotional_notes || null, id, user.id
+            emotional_notes || null, journal_entry || null, id, user.id
           );
         } else {
           db.prepare(`
-            INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes, journal_entry, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             id, user.id, date, mood, emoji || null, stress_level || null, motivation_level || null,
             connected_score || null, relaxed_score || null, anxiety_score || null,
-            emotional_notes || null, now
+            emotional_notes || null, journal_entry || null, now
           );
         }
 
-        // Supportive message generation based on mood and feelings
-        let supportiveMessage = "Thank you for taking time to check in with yourself. Every emotional state is valid.";
-        if (mood === 'Tired') supportiveMessage = "Remember to take a break. You deserve some gentle time to rest and recharge.";
-        else if (mood === 'Stressed' || mood === 'Overwhelmed') supportiveMessage = "Take a slow, deep breath. You don't have to solve everything at once. Focus on one gentle step.";
-        else if (mood === 'Happy' || mood === 'Excited') supportiveMessage = "That's wonderful! Keep enjoying the little things in life and savor this moment.";
-        else if (mood === 'Relaxed') supportiveMessage = "Peace of mind is a beautiful gift. Enjoy this serene balance.";
-        else if (mood === 'Anxious') supportiveMessage = "Ground yourself: feel your feet on the floor, unclench your jaw, and know that this moment will pass safely.";
+        // Supportive message generation based on mood and feelings (never clinical diagnoses)
+        let supportiveMessage = "Cảm ơn bạn đã dành thời gian lắng nghe chính mình. Mọi cảm xúc đều xứng đáng được tôn trọng.";
+        if (mood === 'Tired') supportiveMessage = "Hãy cho phép bản thân nghỉ ngơi. Bạn xứng đáng có những giây phút thư giãn để tái tạo năng lượng.";
+        else if (mood === 'Stressed' || mood === 'Overwhelmed') supportiveMessage = "Hãy hít một hơi thật chậm và sâu. Bạn không cần phải giải quyết mọi việc ngay bây giờ. Từng bước nhỏ thôi nhé.";
+        else if (mood === 'Happy' || mood === 'Excited') supportiveMessage = "Thật tuyệt vời! Hãy trân trọng và tận hưởng trọn vẹn những năng lượng tích cực này.";
+        else if (mood === 'Relaxed') supportiveMessage = "Bình yên trong tâm trí là món quà quý giá nhất. Hãy tận hưởng khoảnh khắc này.";
+        else if (mood === 'Anxious') supportiveMessage = "Hãy thả lỏng vai và cơ hàm. Hít thở sâu và cảm nhận đôi chân vững chãi trên mặt đất. Cảm giác này rồi sẽ qua đi an toàn.";
 
         const record = db.prepare('SELECT * FROM mood_checkins WHERE id = ?').get(id);
         return sendJSON(res, 200, { success: true, message: 'Emotional reflection saved.', record, supportiveMessage });
@@ -776,6 +858,9 @@ async function handleRequest(req, res) {
 
         const body = await parseBody(req);
         const userMessage = body.message || '';
+        const mode = body.mode || 'general'; // 'general', 'schedule', 'wellness', 'insight'
+        const language = body.language || 'vi';
+
         if (!userMessage.trim()) {
           return sendJSON(res, 400, { success: false, message: 'Message is required.' });
         }
@@ -786,12 +871,12 @@ async function handleRequest(req, res) {
           userChatId, user.id, 'user', userMessage, now
         );
 
-        // Fetch user context for tailored wellness insights
+        // Fetch user context for tailored wellness insights (strictly authorized data only)
         const recentHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
         const recentMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
-        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 20').all(user.id);
+        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 30').all(user.id);
 
-        const aiResult = generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks });
+        const aiResult = await generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks, mode, language });
 
         const aiChatId = 'chat_' + crypto.randomUUID();
         db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
@@ -891,10 +976,38 @@ async function handleRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const days = parseInt(parsedUrl.query.days) || 7;
+        const startDate = parsedUrl.query.startDate;
+        const endDate = parsedUrl.query.endDate;
 
-        const tasks = db.prepare('SELECT category, priority, status, date FROM tasks WHERE user_id = ?').all(user.id);
-        const health = db.prepare('SELECT checkin_date, sleep_duration, water_intake, energy_level, physical_condition FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, days);
-        const mood = db.prepare('SELECT checkin_date, mood, stress_level, motivation_level FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, days);
+        let taskQuery = 'SELECT category, priority, status, date FROM tasks WHERE user_id = ?';
+        const taskParams = [user.id];
+
+        let healthQuery = 'SELECT checkin_date, sleep_duration, water_intake, energy_level, physical_condition, exercise_status, exercise_duration FROM health_checkins WHERE user_id = ?';
+        const healthParams = [user.id];
+
+        let moodQuery = 'SELECT checkin_date, mood, stress_level, motivation_level, relaxed_score, anxiety_score FROM mood_checkins WHERE user_id = ?';
+        const moodParams = [user.id];
+
+        if (startDate && endDate) {
+          taskQuery += ' AND date >= ? AND date <= ?';
+          taskParams.push(startDate, endDate);
+
+          healthQuery += ' AND checkin_date >= ? AND checkin_date <= ? ORDER BY checkin_date ASC';
+          healthParams.push(startDate, endDate);
+
+          moodQuery += ' AND checkin_date >= ? AND checkin_date <= ? ORDER BY checkin_date ASC';
+          moodParams.push(startDate, endDate);
+        } else {
+          healthQuery += ' ORDER BY checkin_date DESC LIMIT ?';
+          healthParams.push(days);
+
+          moodQuery += ' ORDER BY checkin_date DESC LIMIT ?';
+          moodParams.push(days);
+        }
+
+        const tasks = db.prepare(taskQuery).all(...taskParams);
+        const health = db.prepare(healthQuery).all(...healthParams);
+        const mood = db.prepare(moodQuery).all(...moodParams);
 
         // Productivity by category
         const categoryCounts = {};
@@ -908,13 +1021,16 @@ async function handleRequest(req, res) {
           moodCounts[m.mood] = (moodCounts[m.mood] || 0) + 1;
         });
 
+        const sortedHealth = startDate && endDate ? health : health.reverse();
+        const sortedMood = startDate && endDate ? mood : mood.reverse();
+
         return sendJSON(res, 200, {
           success: true,
           stats: {
             categoryCounts,
             moodCounts,
-            healthHistory: health.reverse(),
-            moodHistory: mood.reverse(),
+            healthHistory: sortedHealth,
+            moodHistory: sortedMood,
             totalTasks: tasks.length,
             completedTasks: tasks.filter(t => t.status === 'completed').length
           }

@@ -1,14 +1,19 @@
 const crypto = require('node:crypto');
 const { getDb, hashPassword, verifyPassword } = require('./db');
 
-// Seed default demo user if empty
+// Seed default demo user if development or explicitly enabled
 function ensureDemoUser() {
+  // If in strict production without DEMO_MODE, do not seed demo credentials
+  if (process.env.NODE_ENV === 'production' && !process.env.ENABLE_DEMO_SEED) {
+    return;
+  }
   const db = getDb();
   const demoEmail = 'alex.balance@lifecare.app';
   const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(demoEmail);
   if (!existing) {
     const userId = 'usr_demo_1001';
-    const { hash, salt } = hashPassword('LifeCare2026!');
+    const demoPassword = process.env.DEMO_USER_PASSWORD || 'LifeCare2026!';
+    const { hash, salt } = hashPassword(demoPassword);
     const now = new Date().toISOString();
     
     db.prepare(`

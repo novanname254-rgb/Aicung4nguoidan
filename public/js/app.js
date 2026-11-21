@@ -1,20 +1,59 @@
 /**
  * LifeCare – Your Life, Your Balance
- * Complete Client-Side Application Controller
+ * Comprehensive Client Controller with Multi-language, Overlaps, Recurring Tasks,
+ * Dynamic Data, Meal/Exercise Tracking, Emotional Journal & Mood Calendar
  */
 
-// Global state
+// Global State
 const AppState = {
   token: localStorage.getItem('lifecare_token') || '',
   user: null,
   activeView: 'dashboard',
   tasks: [],
+  overlaps: [],
   notifications: [],
   calendarView: 'month', // 'month', 'week', 'day'
   charts: {},
   theme: localStorage.getItem('lifecare_theme') || 'light',
+  language: localStorage.getItem('lifecare_lang') || 'vi',
+  aiMode: 'schedule', // 'schedule', 'wellness', 'insight'
   deferredPwaPrompt: null
 };
+
+// I18N Helper
+function t(key) {
+  const dict = (window.I18N && window.I18N[AppState.language]) ? window.I18N[AppState.language] : (window.I18N ? window.I18N['vi'] : {});
+  return dict[key] || key;
+}
+
+function applyLanguage(lang) {
+  AppState.language = lang;
+  localStorage.setItem('lifecare_lang', lang);
+  document.documentElement.lang = lang;
+
+  // Update header indicator
+  const flagEl = document.getElementById('currentLangFlag');
+  const textEl = document.getElementById('currentLangText');
+  if (flagEl && textEl) {
+    flagEl.innerText = lang === 'vi' ? '🇻🇳' : '🇺🇸';
+    textEl.innerText = lang === 'vi' ? 'VI' : 'EN';
+  }
+
+  // Update all [data-i18n] elements
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    el.innerText = t(key);
+  });
+
+  // Re-render dynamic active views
+  if (AppState.activeView === 'dashboard') loadDashboard();
+  else if (AppState.activeView === 'planner') loadPlanner();
+  else if (AppState.activeView === 'physical') loadPhysicalHealth();
+  else if (AppState.activeView === 'mental') loadMentalHealth();
+  else if (AppState.activeView === 'timeline') loadTimeline('30days');
+  else if (AppState.activeView === 'statistics') loadStatistics();
+  else if (AppState.activeView === 'settings') loadSettings();
+}
 
 // API Helper
 async function apiRequest(endpoint, options = {}) {
@@ -32,7 +71,6 @@ async function apiRequest(endpoint, options = {}) {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 401 && AppState.token) {
-        // Token expired or invalid
         AppState.token = '';
         localStorage.removeItem('lifecare_token');
         showAuthModal(true);
@@ -65,6 +103,7 @@ function showToast(message, type = 'info') {
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   initPWA();
+  bindLanguage();
   bindNavigation();
   bindAuthEvents();
   bindPlannerEvents();
@@ -73,6 +112,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindAiChat();
   bindSettings();
   bindProactiveBanner();
+
+  // Apply initial language
+  applyLanguage(AppState.language);
 
   // Check current session
   if (AppState.token) {
@@ -85,7 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       showAuthModal(true);
     }
   } else {
-    // Attempt auto-login with pre-seeded demo user
+    // Attempt auto-login with demo user if available
     try {
       const loginRes = await apiRequest('/api/auth/login', {
         method: 'POST',
@@ -125,11 +167,30 @@ function initPWA() {
         btn.style.display = 'none';
         AppState.deferredPwaPrompt.prompt();
         const choice = await AppState.deferredPwaPrompt.userChoice;
-        console.log('User PWA install response:', choice.outcome);
         AppState.deferredPwaPrompt = null;
       });
     }
   });
+}
+
+// Language switch binding
+function bindLanguage() {
+  const switchBtn = document.getElementById('langSwitchBtn');
+  if (switchBtn) {
+    switchBtn.addEventListener('click', () => {
+      const nextLang = AppState.language === 'vi' ? 'en' : 'vi';
+      applyLanguage(nextLang);
+      showToast(nextLang === 'vi' ? 'Đã đổi sang Tiếng Việt' : 'Switched to English');
+    });
+  }
+
+  const setLangSelect = document.getElementById('setLanguage');
+  if (setLangSelect) {
+    setLangSelect.value = AppState.language;
+    setLangSelect.addEventListener('change', () => {
+      applyLanguage(setLangSelect.value);
+    });
+  }
 }
 
 // Theme handling
@@ -142,7 +203,6 @@ function initTheme() {
     localStorage.setItem('lifecare_theme', AppState.theme);
     document.documentElement.setAttribute('data-theme', AppState.theme);
     updateThemeIcons();
-    // Update charts if loaded
     if (AppState.activeView === 'statistics') {
       loadStatistics();
     }
@@ -163,14 +223,12 @@ function updateThemeIcons() {
 
 // Sidebar & Page Navigation
 function bindNavigation() {
-  // Mobile drawer toggle
   const mobileBtn = document.getElementById('mobileMenuBtn');
   const sidebar = document.getElementById('appSidebar');
   mobileBtn.addEventListener('click', () => {
     sidebar.classList.toggle('open');
   });
 
-  // Nav links
   const links = document.querySelectorAll('.sidebar-nav .nav-link');
   links.forEach(link => {
     link.addEventListener('click', () => {
@@ -180,13 +238,11 @@ function bindNavigation() {
     });
   });
 
-  // Logo goes to dashboard
   document.getElementById('brandLogo').addEventListener('click', (e) => {
     e.preventDefault();
     navigateToView('dashboard');
   });
 
-  // Dashboard quick triggers
   document.getElementById('btnGoToPlanner').addEventListener('click', () => navigateToView('planner'));
   document.getElementById('btnDashPhysCheckin').addEventListener('click', () => navigateToView('physical'));
   document.getElementById('btnDashMoodCheckin').addEventListener('click', () => navigateToView('mental'));
@@ -205,24 +261,23 @@ function navigateToView(viewName) {
 
   // Title update
   const titles = {
-    dashboard: 'Dashboard',
-    planner: 'My Planner & Schedule',
-    physical: 'Physical Health Check-in',
-    mental: 'Mental Wellness & Mood Reflection',
-    timeline: 'Personal Health Timeline',
-    statistics: 'Statistics & Personal Reports',
-    settings: 'Settings & Privacy'
+    dashboard: t('navDashboard'),
+    planner: t('navPlanner'),
+    physical: t('navPhysical'),
+    mental: t('navMental'),
+    timeline: t('navTimeline'),
+    statistics: t('navStatistics'),
+    settings: t('navSettings')
   };
   document.getElementById('pageTitle').innerText = titles[viewName] || 'LifeCare';
 
-  // Load view-specific data
   if (viewName === 'dashboard') loadDashboard();
-  if (viewName === 'planner') loadPlanner();
-  if (viewName === 'physical') loadPhysicalHealth();
-  if (viewName === 'mental') loadMentalHealth();
-  if (viewName === 'timeline') loadTimeline('30days');
-  if (viewName === 'statistics') loadStatistics();
-  if (viewName === 'settings') loadSettings();
+  else if (viewName === 'planner') loadPlanner();
+  else if (viewName === 'physical') loadPhysicalHealth();
+  else if (viewName === 'mental') loadMentalHealth();
+  else if (viewName === 'timeline') loadTimeline('30days');
+  else if (viewName === 'statistics') loadStatistics();
+  else if (viewName === 'settings') loadSettings();
 }
 
 function updateUserUI() {
@@ -244,13 +299,12 @@ function bindAuthEvents() {
   const forgotForm = document.getElementById('forgotForm');
   const title = document.getElementById('authModalTitle');
 
-  // Switch between forms
   document.getElementById('showRegisterLink').addEventListener('click', (e) => {
     e.preventDefault();
     loginForm.style.display = 'none';
     registerForm.style.display = 'block';
     forgotForm.style.display = 'none';
-    title.innerText = 'Create your LifeCare Account';
+    title.innerText = t('createAccountTitle');
   });
 
   document.getElementById('showLoginLink').addEventListener('click', (e) => {
@@ -258,7 +312,7 @@ function bindAuthEvents() {
     registerForm.style.display = 'none';
     loginForm.style.display = 'block';
     forgotForm.style.display = 'none';
-    title.innerText = 'Sign In to LifeCare';
+    title.innerText = t('signInTitle');
   });
 
   document.getElementById('showForgotLink').addEventListener('click', (e) => {
@@ -266,7 +320,7 @@ function bindAuthEvents() {
     loginForm.style.display = 'none';
     registerForm.style.display = 'none';
     forgotForm.style.display = 'block';
-    title.innerText = 'Password Recovery';
+    title.innerText = t('passwordRecoveryTitle');
   });
 
   document.getElementById('backToLoginLink').addEventListener('click', (e) => {
@@ -274,10 +328,9 @@ function bindAuthEvents() {
     registerForm.style.display = 'none';
     forgotForm.style.display = 'none';
     loginForm.style.display = 'block';
-    title.innerText = 'Sign In to LifeCare';
+    title.innerText = t('signInTitle');
   });
 
-  // Login Submit
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -292,14 +345,13 @@ function bindAuthEvents() {
       AppState.user = res.user;
       updateUserUI();
       showAuthModal(false);
-      showToast(`Welcome back, ${res.user.full_name}!`);
+      showToast(`${t('greetingMorning')}, ${res.user.full_name}!`);
       loadDashboard();
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 
-  // Register Submit
   registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -320,14 +372,13 @@ function bindAuthEvents() {
       AppState.user = res.user;
       updateUserUI();
       showAuthModal(false);
-      showToast('Registration successful! Welcome to LifeCare.');
+      showToast(AppState.language === 'vi' ? 'Đăng ký thành công! Chào mừng bạn.' : 'Registration successful! Welcome.');
       loadDashboard();
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 
-  // Forgot Password Submit
   forgotForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -337,18 +388,14 @@ function bindAuthEvents() {
         body: JSON.stringify({ email })
       });
       showToast(res.message);
-      if (res.demoResetToken) {
-        alert(`DEMO MODE NOTICE:\nPassword reset token created:\n${res.demoResetToken}\n(In production this is delivered via secure email)`);
-      }
       document.getElementById('backToLoginLink').click();
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 
-  // Logout
   document.getElementById('sidebarLogoutBtn').addEventListener('click', async () => {
-    if (confirm('Are you sure you want to sign out?')) {
+    if (confirm(AppState.language === 'vi' ? 'Bạn có chắc chắn muốn đăng xuất?' : 'Are you sure you want to sign out?')) {
       try {
         await apiRequest('/api/auth/logout', { method: 'POST' });
       } catch (e) {}
@@ -356,24 +403,24 @@ function bindAuthEvents() {
       AppState.user = null;
       localStorage.removeItem('lifecare_token');
       showAuthModal(true);
-      showToast('Signed out successfully.');
+      showToast(AppState.language === 'vi' ? 'Đã đăng xuất.' : 'Signed out.');
     }
   });
 }
 
 function showAuthModal(show) {
   const modal = document.getElementById('authModal');
-  if (show) {
-    modal.classList.add('active');
-  } else {
-    modal.classList.remove('active');
-  }
+  if (show) modal.classList.add('active');
+  else modal.classList.remove('active');
 }
 
 // ==========================================
 // 2. MAIN DASHBOARD CONTROLLER
 // ==========================================
 async function loadDashboard() {
+  const container = document.getElementById('dashTodayTasksList');
+  container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">⌛ Đang tải dữ liệu...</div>`;
+
   try {
     const todayStr = new Date().toISOString().split('T')[0];
     const data = await apiRequest(`/api/dashboard?date=${todayStr}`);
@@ -381,62 +428,105 @@ async function loadDashboard() {
 
     // Greeting by time of day
     const hour = new Date().getHours();
-    let timeGreeting = 'Good morning';
+    let timeGreeting = t('greetingMorning');
     let emoji = '🌅';
     if (hour >= 12 && hour < 17) {
-      timeGreeting = 'Good afternoon';
+      timeGreeting = t('greetingAfternoon');
       emoji = '☀️';
     } else if (hour >= 17) {
-      timeGreeting = 'Good evening';
+      timeGreeting = t('greetingEvening');
       emoji = '🌙';
     }
 
-    const firstName = dash.user.full_name ? dash.user.full_name.split(' ')[0] : 'there';
+    const firstName = dash.user.full_name ? dash.user.full_name.split(' ')[0] : '';
     document.getElementById('welcomeGreeting').innerText = `${timeGreeting}, ${firstName}! ${emoji}`;
 
-    const dateOptions = { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' };
-    document.getElementById('currentDateDisplay').innerText = new Date().toLocaleDateString('en-US', dateOptions);
+    // Fixed Date formatting
+    const dateOptions = { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' };
+    document.getElementById('currentDateDisplay').innerText = new Date().toLocaleDateString(AppState.language === 'vi' ? 'vi-VN' : 'en-US', dateOptions);
 
     // Metrics
     document.getElementById('dashCompletedTasks').innerText = dash.taskStats.completed;
     document.getElementById('dashRemainingTasks').innerText = dash.taskStats.remaining;
-    document.getElementById('dashCompletionRate').innerText = `${dash.taskStats.completionRate}% of today's plan`;
+    document.getElementById('dashCompletionRate').innerText = `${dash.taskStats.completionRate}% ` + (AppState.language === 'vi' ? 'mục tiêu ngày' : 'of daily plan');
+    document.getElementById('dashRemainingSub').innerText = `${dash.taskStats.remaining} ` + (AppState.language === 'vi' ? 'công việc đang chờ' : 'tasks pending');
 
     // Sleep Metric
     if (dash.healthStatus.latestPhysical && dash.healthStatus.latestPhysical.sleep_duration) {
       document.getElementById('dashSleepDuration').innerText = `${dash.healthStatus.latestPhysical.sleep_duration}h`;
-      document.getElementById('dashSleepQuality').innerText = `Quality: ${dash.healthStatus.latestPhysical.sleep_quality || 'Good'}`;
+      document.getElementById('dashSleepQuality').innerText = `${t('sleepQuality')}: ${dash.healthStatus.latestPhysical.sleep_quality || 'Good'}`;
     } else {
       document.getElementById('dashSleepDuration').innerText = '--';
-      document.getElementById('dashSleepQuality').innerText = 'Check-in pending';
+      document.getElementById('dashSleepQuality').innerText = t('pendingCheckin');
     }
 
     // Mood Metric
     if (dash.emotionalStatus.latestMood) {
       document.getElementById('dashMoodValue').innerText = `${dash.emotionalStatus.latestMood.emoji || '✨'} ${dash.emotionalStatus.latestMood.mood}`;
-      document.getElementById('dashMoodSub').innerText = 'Last logged today';
+      document.getElementById('dashMoodSub').innerText = AppState.language === 'vi' ? 'Ghi nhận hôm nay' : 'Logged today';
     } else {
-      document.getElementById('dashMoodValue').innerText = 'Pending';
-      document.getElementById('dashMoodSub').innerText = 'Reflection waiting';
+      document.getElementById('dashMoodValue').innerText = t('pendingCheckin');
+      document.getElementById('dashMoodSub').innerText = AppState.language === 'vi' ? 'Chưa phản chiếu' : 'Pending reflection';
     }
 
-    // Today's schedule rendering
+    // Compute Today's Well-being Score
+    calculateTodayWellbeing(dash);
+
+    // Render today's schedule
     renderDashboardTasks(dash.todayTasks);
 
-    // Health overview column
+    // Health overview
     renderDashboardHealthOverview(dash.healthStatus.latestPhysical, dash.emotionalStatus.latestMood);
 
-    // Check proactive checkin banner status (Feature #1)
+    // Proactive check-in banner status
     if (dash.healthStatus.todayCheckinCompleted) {
       document.getElementById('proactiveBanner').style.display = 'none';
     } else {
       document.getElementById('proactiveBanner').style.display = 'flex';
     }
 
-    // Feature #4: Smart Schedule Recommendation
+    // Schedule recommendations
     loadScheduleRecommendations();
   } catch (err) {
-    console.error('Failed loading dashboard:', err);
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: #DC2626;">⚠️ Không thể tải dữ liệu: ${err.message}</div>`;
+  }
+}
+
+// Calculate composite well-being score
+function calculateTodayWellbeing(dash) {
+  let score = 50; // Base score
+  const h = dash.healthStatus.latestPhysical;
+  const m = dash.emotionalStatus.latestMood;
+
+  if (h && h.sleep_duration) {
+    if (h.sleep_duration >= 7 && h.sleep_duration <= 9) score += 20;
+    else if (h.sleep_duration >= 6) score += 10;
+    document.getElementById('wellbeingSleepPill').innerText = `${h.sleep_duration}h ${AppState.language === 'vi' ? 'ngủ' : 'sleep'}`;
+  } else {
+    document.getElementById('wellbeingSleepPill').innerText = `--h ${AppState.language === 'vi' ? 'ngủ' : 'sleep'}`;
+  }
+
+  if (h && h.energy_level) {
+    score += (h.energy_level * 3);
+    document.getElementById('wellbeingEnergyPill').innerText = `${AppState.language === 'vi' ? 'Năng lượng' : 'Energy'}: ${h.energy_level}/5`;
+  }
+
+  if (m && m.stress_level) {
+    score -= (m.stress_level * 3);
+    document.getElementById('wellbeingStressPill').innerText = `${AppState.language === 'vi' ? 'Căng thẳng' : 'Stress'}: ${m.stress_level}/5`;
+  }
+
+  if (dash.taskStats && dash.taskStats.completionRate > 0) {
+    score += Math.round(dash.taskStats.completionRate * 0.15);
+  }
+
+  score = Math.max(20, Math.min(100, Math.round(score)));
+  document.getElementById('wellbeingCircleScore').innerHTML = `${score}<span>/100</span>`;
+
+  if (score >= 75) {
+    document.getElementById('wellbeingStatusText').innerText = t('wellbeingBalanced');
+  } else {
+    document.getElementById('wellbeingStatusText').innerText = t('wellbeingNeedRest');
   }
 }
 
@@ -445,32 +535,40 @@ function renderDashboardTasks(tasks) {
   if (!tasks || tasks.length === 0) {
     container.innerHTML = `
       <div style="text-align: center; padding: 32px 16px; color: var(--text-muted);">
-        <p style="font-size: 1.1rem; margin-bottom: 8px;">🕊️ No tasks scheduled yet for today.</p>
-        <p style="font-size: 0.85rem;">Take a moment to plan your key priorities or enjoy a restorative day.</p>
+        <p style="font-size: 1.1rem; margin-bottom: 8px;">🕊️ ${t('noTasksToday')}</p>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = tasks.map(task => `
-    <div class="task-item ${task.status === 'completed' ? 'completed' : ''}" data-task-id="${task.id}">
-      <input type="checkbox" class="task-checkbox" ${task.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${task.id}', this.checked)" />
-      <div class="task-details">
-        <div class="task-title">${escapeHTML(task.title)}</div>
-        <div class="task-meta">
-          <span class="badge badge-${task.category.toLowerCase()}">${task.category}</span>
-          <span class="priority-${task.priority}">Priority: ${task.priority.toUpperCase()}</span>
-          ${task.start_time ? `<span>🕒 ${task.start_time} ${task.end_time ? '– ' + task.end_time : ''}</span>` : ''}
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  container.innerHTML = tasks.map(task => {
+    const isOverdue = task.status !== 'completed' && task.date < todayStr;
+    return `
+      <div class="task-item ${task.status === 'completed' ? 'completed' : ''}" data-task-id="${task.id}">
+        <input type="checkbox" class="task-checkbox" ${task.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${task.id}', this.checked)" />
+        <div class="task-details">
+          <div class="task-title">
+            ${escapeHTML(task.title)}
+            ${isOverdue ? `<span class="badge badge-overdue">${t('overdue')}</span>` : ''}
+            ${task.recurring && task.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${task.recurring}</span>` : ''}
+          </div>
+          <div class="task-meta">
+            <span class="badge badge-${task.category.toLowerCase()}">${task.category}</span>
+            <span class="priority-${task.priority}">${t('priorityLabel')}: ${task.priority.toUpperCase()}</span>
+            ${task.start_time ? `<span>🕒 ${task.start_time} ${task.end_time ? '– ' + task.end_time : ''}</span>` : ''}
+          </div>
         </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function renderDashboardHealthOverview(health, mood) {
   const container = document.getElementById('dashHealthOverviewContent');
   if (!health && !mood) {
-    container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.86rem;">No check-ins recorded yet today. Check-ins help track subtle patterns over time!</p>`;
+    container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.86rem;">${AppState.language === 'vi' ? 'Chưa có ghi nhận hôm nay. Điểm danh giúp nhận biết thói quen sớm!' : 'No logs yet today. Logging builds self-awareness!'}</p>`;
     return;
   }
 
@@ -478,20 +576,22 @@ function renderDashboardHealthOverview(health, mood) {
   if (health) {
     html += `
       <div style="background: var(--bg-main); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-        <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">Physical Vitality</div>
+        <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${t('healthOverview')}</div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
-          Condition: <strong>${health.physical_condition || 'Good'}</strong> • Sleep: <strong>${health.sleep_duration || '--'}h</strong> • Water: <strong>${health.water_intake || '--'}L</strong>
+          ${health.physical_condition || 'Good'} • ${health.sleep_duration || '--'}h • ${health.water_intake || '--'}L
         </div>
+        ${health.exercise_type ? `<div style="font-size: 0.76rem; color: var(--primary); margin-top: 2px;">🏃 ${health.exercise_type} (${health.exercise_duration || 0}m)</div>` : ''}
       </div>
     `;
   }
   if (mood) {
     html += `
       <div style="background: var(--bg-main); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-        <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">Emotional Balance</div>
+        <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${t('navMental')}</div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
-          Mood: <strong>${mood.emoji || ''} ${mood.mood}</strong> • Stress Level: <strong>${mood.stress_level || 2}/5</strong>
+          ${mood.emoji || ''} ${mood.mood} • ${AppState.language === 'vi' ? 'Căng thẳng' : 'Stress'}: ${mood.stress_level || 2}/5
         </div>
+        ${mood.journal_entry ? `<div style="font-size: 0.76rem; font-style: italic; color: var(--text-main); margin-top: 4px;">"${escapeHTML(mood.journal_entry.substring(0, 60))}..."</div>` : ''}
       </div>
     `;
   }
@@ -499,7 +599,7 @@ function renderDashboardHealthOverview(health, mood) {
   container.innerHTML = html;
 }
 
-// Feature #4: Smart Schedule Recommendations
+// Schedule recommendations
 async function loadScheduleRecommendations() {
   try {
     const res = await apiRequest('/api/schedule/recommendations');
@@ -508,12 +608,12 @@ async function loadScheduleRecommendations() {
       summaryEl.innerText = res.recommendations[0];
     }
     document.getElementById('btnApplyScheduleRec').onclick = () => {
-      alert(`LifeCare Schedule Balance Insight:\n\n${res.summary}\n\nKey Recommendations:\n${res.recommendations.map(r => '• ' + r).join('\n')}`);
+      alert(`${t('scheduleRecTitle')}:\n\n${res.summary}\n\n${res.recommendations.map(r => '• ' + r).join('\n')}`);
     };
   } catch (e) {}
 }
 
-// Quick Dashboard Action Triggers
+// Proactive 30s Quick Check-in
 function bindProactiveBanner() {
   const rapidModal = document.getElementById('rapidCheckinModal');
   const openRapid = () => { rapidModal.classList.add('active'); };
@@ -526,7 +626,6 @@ function bindProactiveBanner() {
   });
   document.getElementById('rapidModalClose').addEventListener('click', closeRapid);
 
-  // Submit rapid 30s checkin
   document.getElementById('rapidCheckinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -547,7 +646,7 @@ function bindProactiveBanner() {
 
       closeRapid();
       document.getElementById('proactiveBanner').style.display = 'none';
-      showToast('30-second check-in saved! Have a wonderful day.');
+      showToast(AppState.language === 'vi' ? 'Điểm danh 30 giây thành công!' : '30-second check-in saved!');
       loadDashboard();
     } catch (err) {
       showToast(err.message, 'error');
@@ -568,7 +667,6 @@ function bindPlannerEvents() {
   document.getElementById('taskModalClose').addEventListener('click', () => taskModal.classList.remove('active'));
   document.getElementById('taskModalCancel').addEventListener('click', () => taskModal.classList.remove('active'));
 
-  // Task form submission
   document.getElementById('taskForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -580,19 +678,24 @@ function bindPlannerEvents() {
       const date = document.getElementById('taskDate').value;
       const start_time = document.getElementById('taskStartTime').value;
       const end_time = document.getElementById('taskEndTime').value;
+      const recurring = document.getElementById('taskRecurring').value;
+      const reminder_time = document.getElementById('taskReminderTime').value;
 
       if (id) {
         await apiRequest(`/api/tasks/${id}`, {
           method: 'PUT',
-          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time })
+          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time, recurring, reminder_time })
         });
-        showToast('Task updated successfully.');
+        showToast(AppState.language === 'vi' ? 'Đã cập nhật công việc.' : 'Task updated.');
       } else {
-        await apiRequest('/api/tasks', {
+        const res = await apiRequest('/api/tasks', {
           method: 'POST',
-          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time })
+          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time, recurring, reminder_time })
         });
-        showToast('New task added to schedule.');
+        showToast(AppState.language === 'vi' ? 'Đã tạo công việc mới.' : 'Task created.');
+        if (res.overlapWarning) {
+          alert('⚠️ ' + res.overlapWarning);
+        }
       }
 
       taskModal.classList.remove('active');
@@ -603,7 +706,6 @@ function bindPlannerEvents() {
     }
   });
 
-  // Calendar View Switchers (Month / Week / Day)
   document.querySelectorAll('.calendar-view-tabs .view-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.calendar-view-tabs .view-tab-btn').forEach(b => b.classList.remove('active'));
@@ -613,20 +715,23 @@ function bindPlannerEvents() {
     });
   });
 
-  // Filters
   document.getElementById('taskSearchInput').addEventListener('input', () => filterAndRenderTaskList());
   document.getElementById('taskCategoryFilter').addEventListener('change', () => filterAndRenderTaskList());
   document.getElementById('taskPriorityFilter').addEventListener('change', () => filterAndRenderTaskList());
 }
 
 async function loadPlanner() {
+  const container = document.getElementById('allTasksList');
+  container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">⌛ Đang tải danh sách công việc...</div>`;
+
   try {
     const data = await apiRequest('/api/tasks');
     AppState.tasks = data.tasks || [];
+    AppState.overlaps = data.overlaps || [];
     renderCalendar();
     filterAndRenderTaskList();
   } catch (err) {
-    showToast(err.message, 'error');
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: #DC2626;">⚠️ Lỗi: ${err.message}</div>`;
   }
 }
 
@@ -641,8 +746,10 @@ function openTaskModal(task = null, defaultDate = null) {
   document.getElementById('taskDate').value = task ? task.date : (defaultDate || new Date().toISOString().split('T')[0]);
   document.getElementById('taskStartTime').value = task ? (task.start_time || '') : '';
   document.getElementById('taskEndTime').value = task ? (task.end_time || '') : '';
+  document.getElementById('taskRecurring').value = task ? (task.recurring || 'none') : 'none';
+  document.getElementById('taskReminderTime').value = task ? (task.reminder_time || '') : '';
 
-  title.innerText = task ? 'Edit Task or Event' : 'Create Task or Event';
+  title.innerText = task ? (AppState.language === 'vi' ? 'Sửa Công Việc' : 'Edit Task') : t('createTaskEvent');
   modal.classList.add('active');
 }
 
@@ -652,9 +759,8 @@ async function toggleTaskStatus(taskId, completed) {
       method: 'PUT',
       body: JSON.stringify({ status: completed ? 'completed' : 'pending' })
     });
-    // Update local state
-    const t = AppState.tasks.find(x => x.id === taskId);
-    if (t) t.status = completed ? 'completed' : 'pending';
+    const tItem = AppState.tasks.find(x => x.id === taskId);
+    if (tItem) tItem.status = completed ? 'completed' : 'pending';
     if (AppState.activeView === 'dashboard') loadDashboard();
     if (AppState.activeView === 'planner') loadPlanner();
   } catch (err) {
@@ -663,10 +769,10 @@ async function toggleTaskStatus(taskId, completed) {
 }
 
 async function deleteTask(taskId) {
-  if (confirm('Delete this task from your planner?')) {
+  if (confirm(AppState.language === 'vi' ? 'Bạn có chắc chắn muốn xóa công việc này?' : 'Delete this task?')) {
     try {
       await apiRequest(`/api/tasks/${taskId}`, { method: 'DELETE' });
-      showToast('Task removed.');
+      showToast(AppState.language === 'vi' ? 'Đã xóa công việc.' : 'Task removed.');
       loadPlanner();
       if (AppState.activeView === 'dashboard') loadDashboard();
     } catch (err) {
@@ -684,23 +790,24 @@ function renderCalendar() {
   if (AppState.calendarView === 'month') {
     const firstDayIndex = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthNames = AppState.language === 'vi'
+      ? ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12']
+      : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
     let html = `
       <div style="font-weight: 800; font-size: 1.1rem; color: var(--text-heading); margin-bottom: 12px;">
         ${monthNames[month]} ${year}
       </div>
       <div class="month-grid">
-        <div class="month-day-header">Sun</div>
-        <div class="month-day-header">Mon</div>
-        <div class="month-day-header">Tue</div>
-        <div class="month-day-header">Wed</div>
-        <div class="month-day-header">Thu</div>
-        <div class="month-day-header">Fri</div>
-        <div class="month-day-header">Sat</div>
+        <div class="month-day-header">CN</div>
+        <div class="month-day-header">T2</div>
+        <div class="month-day-header">T3</div>
+        <div class="month-day-header">T4</div>
+        <div class="month-day-header">T5</div>
+        <div class="month-day-header">T6</div>
+        <div class="month-day-header">T7</div>
     `;
 
-    // Empty offset slots
     for (let i = 0; i < firstDayIndex; i++) {
       html += `<div class="month-day-cell" style="opacity: 0.3; background: transparent;"></div>`;
     }
@@ -716,7 +823,7 @@ function renderCalendar() {
         <div class="month-day-cell ${isToday ? 'today' : ''}" onclick="openTaskModal(null, '${dayStr}')">
           <div class="day-num">${day} ${isToday ? '•' : ''}</div>
           ${dayTasks.slice(0, 2).map(t => `<div class="day-tasks-pill">${escapeHTML(t.title)}</div>`).join('')}
-          ${dayTasks.length > 2 ? `<div style="font-size: 0.65rem; color: var(--primary); font-weight: 700;">+${dayTasks.length - 2} more</div>` : ''}
+          ${dayTasks.length > 2 ? `<div style="font-size: 0.65rem; color: var(--primary); font-weight: 700;">+${dayTasks.length - 2}</div>` : ''}
         </div>
       `;
     }
@@ -732,17 +839,20 @@ function renderCalendar() {
 
     container.innerHTML = `
       <div style="padding: 12px 0;">
-        <h4 style="margin-bottom: 12px;">Tasks for ${AppState.calendarView === 'day' ? 'Today (' + todayStr + ')' : 'Current Period'}</h4>
+        <h4 style="margin-bottom: 12px;">${AppState.calendarView === 'day' ? (AppState.language === 'vi' ? 'Công việc hôm nay (' + todayStr + ')' : 'Tasks for Today (' + todayStr + ')') : (AppState.language === 'vi' ? 'Tất cả công việc' : 'All Tasks')}</h4>
         <div style="display: flex; flex-direction: column; gap: 8px;">
-          ${filtered.length === 0 ? '<p style="color: var(--text-muted);">No tasks scheduled in this view.</p>' : filtered.map(t => `
+          ${filtered.length === 0 ? `<p style="color: var(--text-muted);">${t('noMatchingTasks')}</p>` : filtered.map(tItem => `
             <div class="task-item" style="margin-bottom: 0;">
-              <input type="checkbox" class="task-checkbox" ${t.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${t.id}', this.checked)" />
+              <input type="checkbox" class="task-checkbox" ${tItem.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${tItem.id}', this.checked)" />
               <div class="task-details">
-                <div class="task-title">${escapeHTML(t.title)}</div>
+                <div class="task-title">
+                  ${escapeHTML(tItem.title)}
+                  ${tItem.recurring && tItem.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${tItem.recurring}</span>` : ''}
+                </div>
                 <div class="task-meta">
-                  <span>📅 ${t.date}</span>
-                  ${t.start_time ? `<span>🕒 ${t.start_time}</span>` : ''}
-                  <span class="badge badge-${t.category.toLowerCase()}">${t.category}</span>
+                  <span>📅 ${tItem.date}</span>
+                  ${tItem.start_time ? `<span>🕒 ${tItem.start_time} - ${tItem.end_time || ''}</span>` : ''}
+                  <span class="badge badge-${tItem.category.toLowerCase()}">${tItem.category}</span>
                 </div>
               </div>
             </div>
@@ -758,44 +868,62 @@ function filterAndRenderTaskList() {
   const search = document.getElementById('taskSearchInput').value.toLowerCase();
   const cat = document.getElementById('taskCategoryFilter').value;
   const prio = document.getElementById('taskPriorityFilter').value;
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  const filtered = AppState.tasks.filter(t => {
-    const matchSearch = t.title.toLowerCase().includes(search) || (t.description && t.description.toLowerCase().includes(search));
-    const matchCat = cat === 'all' || t.category === cat;
-    const matchPrio = prio === 'all' || t.priority === prio;
+  const filtered = AppState.tasks.filter(tItem => {
+    const matchSearch = tItem.title.toLowerCase().includes(search) || (tItem.description && tItem.description.toLowerCase().includes(search));
+    const matchCat = cat === 'all' || tItem.category === cat;
+    const matchPrio = prio === 'all' || tItem.priority === prio;
     return matchSearch && matchCat && matchPrio;
   });
 
   if (filtered.length === 0) {
-    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 24px 0;">No matching tasks found.</p>`;
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 24px 0;">${t('noMatchingTasks')}</p>`;
     return;
   }
 
-  container.innerHTML = filtered.map(t => `
-    <div class="task-item ${t.status === 'completed' ? 'completed' : ''}">
-      <input type="checkbox" class="task-checkbox" ${t.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${t.id}', this.checked)" />
-      <div class="task-details">
-        <div class="task-title">${escapeHTML(t.title)}</div>
-        <div class="task-meta">
-          <span>📅 ${t.date}</span>
-          ${t.start_time ? `<span>🕒 ${t.start_time} ${t.end_time ? '– ' + t.end_time : ''}</span>` : ''}
-          <span class="badge badge-${t.category.toLowerCase()}">${t.category}</span>
-          <span class="priority-${t.priority}">Priority: ${t.priority.toUpperCase()}</span>
+  // Check overlap IDs
+  const overlappingIds = new Set();
+  (AppState.overlaps || []).forEach(o => {
+    overlappingIds.add(o.task1Id);
+    overlappingIds.add(o.task2Id);
+  });
+
+  container.innerHTML = filtered.map(tItem => {
+    const isOverdue = tItem.status !== 'completed' && tItem.date < todayStr;
+    const isOverlap = overlappingIds.has(tItem.id);
+
+    return `
+      <div class="task-item ${tItem.status === 'completed' ? 'completed' : ''}">
+        <input type="checkbox" class="task-checkbox" ${tItem.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${tItem.id}', this.checked)" />
+        <div class="task-details">
+          <div class="task-title">
+            ${escapeHTML(tItem.title)}
+            ${isOverdue ? `<span class="badge badge-overdue">${t('overdue')}</span>` : ''}
+            ${isOverlap ? `<span class="badge badge-overlap">${t('overlapWarning')}</span>` : ''}
+            ${tItem.recurring && tItem.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${tItem.recurring}</span>` : ''}
+          </div>
+          <div class="task-meta">
+            <span>📅 ${tItem.date}</span>
+            ${tItem.start_time ? `<span>🕒 ${tItem.start_time} ${tItem.end_time ? '– ' + tItem.end_time : ''}</span>` : ''}
+            <span class="badge badge-${tItem.category.toLowerCase()}">${tItem.category}</span>
+            <span class="priority-${tItem.priority}">${t('priorityLabel')}: ${tItem.priority.toUpperCase()}</span>
+            ${tItem.reminder_time ? `<span>⏰ Nhắc: ${tItem.reminder_time}</span>` : ''}
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-icon" style="width: 32px; height: 32px;" onclick='openTaskModal(${JSON.stringify(tItem).replace(/'/g, "&#39;")})' title="Edit">✎</button>
+          <button class="btn-icon" style="width: 32px; height: 32px; color: #DC2626;" onclick="deleteTask('${tItem.id}')" title="Delete">✕</button>
         </div>
       </div>
-      <div style="display: flex; gap: 6px;">
-        <button class="btn-icon" style="width: 32px; height: 32px;" onclick='openTaskModal(${JSON.stringify(t).replace(/'/g, "&#39;")})' title="Edit">✎</button>
-        <button class="btn-icon" style="width: 32px; height: 32px; color: #DC2626;" onclick="deleteTask('${t.id}')" title="Delete">✕</button>
-      </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // ==========================================
 // 4. PHYSICAL HEALTH CHECK-IN
 // ==========================================
 function bindHealthEvents() {
-  // Energy Rating buttons 1 to 5
   document.querySelectorAll('#energyRatingGroup .rating-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#energyRatingGroup .rating-btn').forEach(b => b.classList.remove('active'));
@@ -804,17 +932,25 @@ function bindHealthEvents() {
     });
   });
 
-  // Physical Form Submit
+  const physExerciseSelect = document.getElementById('physExercise');
+  const exerciseRow = document.getElementById('exerciseDetailsRow');
+  physExerciseSelect.addEventListener('change', () => {
+    exerciseRow.style.display = physExerciseSelect.value === 'Yes' ? 'flex' : 'none';
+  });
+
   document.getElementById('physicalCheckinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
       const checkin_date = document.getElementById('physDate').value || new Date().toISOString().split('T')[0];
       const physical_condition = document.getElementById('physCondition').value;
-      const sleep_duration = parseFloat(document.getElementById('physSleepHours').value) || null;
+      const sleep_duration = document.getElementById('physSleepHours').value;
       const sleep_quality = document.getElementById('physSleepQuality').value;
       const exercise_status = document.getElementById('physExercise').value;
-      const water_intake = parseFloat(document.getElementById('physWater').value) || null;
-      const energy_level = parseInt(document.getElementById('physEnergyLevel').value) || null;
+      const exercise_type = document.getElementById('physExerciseType').value;
+      const exercise_duration = document.getElementById('physExerciseDuration').value;
+      const meals_summary = document.getElementById('physMealsSummary').value;
+      const water_intake = document.getElementById('physWater').value;
+      const energy_level = document.getElementById('physEnergyLevel').value;
       const discomfort = document.getElementById('physDiscomfort').value;
       const notes = document.getElementById('physNotes').value;
 
@@ -826,6 +962,9 @@ function bindHealthEvents() {
           sleep_duration,
           sleep_quality,
           exercise_status,
+          exercise_type,
+          exercise_duration,
+          meals_summary,
           water_intake,
           energy_level,
           discomfort,
@@ -834,9 +973,7 @@ function bindHealthEvents() {
       });
 
       showToast(res.message);
-      if (res.adviceNotice) {
-        alert(res.adviceNotice);
-      }
+      if (res.adviceNotice) alert(res.adviceNotice);
       loadPhysicalHealth();
     } catch (err) {
       showToast(err.message, 'error');
@@ -846,13 +983,15 @@ function bindHealthEvents() {
 
 async function loadPhysicalHealth() {
   document.getElementById('physDate').value = new Date().toISOString().split('T')[0];
+  const container = document.getElementById('physicalHistoryList');
+  container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">⌛ Đang tải lịch sử thể chất...</div>`;
+
   try {
     const res = await apiRequest('/api/health?limit=15');
     const records = res.records || [];
-    const container = document.getElementById('physicalHistoryList');
 
     if (records.length === 0) {
-      container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.88rem;">No health check-ins recorded yet.</p>`;
+      container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.88rem;">Chưa có bản ghi nào.</p>`;
       return;
     }
 
@@ -863,14 +1002,16 @@ async function loadPhysicalHealth() {
           <span style="color: var(--primary);">${r.physical_condition || 'Good'}</span>
         </div>
         <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 6px;">
-          Sleep: <strong>${r.sleep_duration ? r.sleep_duration + 'h' : '--'}</strong> (${r.sleep_quality || 'Good'}) • Water: <strong>${r.water_intake ? r.water_intake + 'L' : '--'}</strong> • Energy: <strong>${r.energy_level || '--'}/5</strong>
+          💤 ${t('sleepHours')}: <strong>${r.sleep_duration ? r.sleep_duration + 'h' : '--'}</strong> (${r.sleep_quality || 'Good'}) • 💧 Nước: <strong>${r.water_intake ? r.water_intake + 'L' : '--'}</strong> • ⚡ Năng lượng: <strong>${r.energy_level || '--'}/5</strong>
         </div>
-        ${r.discomfort ? `<div style="font-size: 0.78rem; color: #DC2626; margin-top: 4px;">Symptom note: ${escapeHTML(r.discomfort)}</div>` : ''}
+        ${r.exercise_type ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🏃 Vận động: <strong>${escapeHTML(r.exercise_type)}</strong> (${r.exercise_duration || 0} phút)</div>` : ''}
+        ${r.meals_summary ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🥗 Bữa ăn: ${escapeHTML(r.meals_summary)}</div>` : ''}
+        ${r.discomfort ? `<div style="font-size: 0.78rem; color: #DC2626; margin-top: 4px;">⚠️ Triệu chứng: ${escapeHTML(r.discomfort)}</div>` : ''}
         ${r.notes ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">"${escapeHTML(r.notes)}"</div>` : ''}
       </div>
     `).join('');
   } catch (err) {
-    showToast(err.message, 'error');
+    container.innerHTML = `<div style="color: #DC2626;">⚠️ ${err.message}</div>`;
   }
 }
 
@@ -878,7 +1019,6 @@ async function loadPhysicalHealth() {
 // 5. MENTAL HEALTH & EMOTIONAL WELLNESS
 // ==========================================
 function bindMoodEvents() {
-  // Mood Picker Grid
   document.querySelectorAll('#moodPickerGrid .mood-option-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('#moodPickerGrid .mood-option-btn').forEach(b => b.classList.remove('active'));
@@ -888,7 +1028,6 @@ function bindMoodEvents() {
     });
   });
 
-  // Mood Form Submit
   document.getElementById('moodCheckinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -900,6 +1039,7 @@ function bindMoodEvents() {
       const connected_score = parseInt(document.getElementById('surveyConnected').value);
       const relaxed_score = parseInt(document.getElementById('surveyRelaxed').value);
       const emotional_notes = document.getElementById('moodNotes').value;
+      const journal_entry = document.getElementById('moodJournalEntry').value;
 
       const res = await apiRequest('/api/mood', {
         method: 'POST',
@@ -911,7 +1051,8 @@ function bindMoodEvents() {
           motivation_level,
           connected_score,
           relaxed_score,
-          emotional_notes
+          emotional_notes,
+          journal_entry
         })
       });
 
@@ -927,46 +1068,85 @@ function bindMoodEvents() {
 }
 
 async function loadMentalHealth() {
+  const container = document.getElementById('moodHistoryList');
+  container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">⌛ Đang tải lịch sử cảm xúc...</div>`;
+
   try {
-    const res = await apiRequest('/api/mood?limit=15');
+    const res = await apiRequest('/api/mood?limit=28');
     const records = res.records || [];
-    const container = document.getElementById('moodHistoryList');
+
+    // Render Mood Calendar
+    renderMoodCalendar(records);
 
     if (records.length === 0) {
-      container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.88rem;">No emotional reflections recorded yet.</p>`;
+      container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.88rem;">Chưa có bản ghi cảm xúc nào.</p>`;
       return;
     }
 
     container.innerHTML = records.map(m => `
-      <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; margin-bottom: 12px;">
-        <div style="display: flex; justify-content: space-between; font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">
+      <div class="journal-entry-card">
+        <div class="journal-date">
           <span>📅 ${m.checkin_date}</span>
           <span>${m.emoji || '✨'} ${m.mood}</span>
         </div>
-        <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 6px;">
-          Stress: <strong>${m.stress_level || '--'}/5</strong> • Motivation: <strong>${m.motivation_level || '--'}/5</strong> • Connected: <strong>${m.connected_score || '--'}/5</strong>
+        <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">
+          Căng thẳng: <strong>${m.stress_level || '--'}/5</strong> • Động lực: <strong>${m.motivation_level || '--'}/5</strong> • Kết nối: <strong>${m.connected_score || '--'}/5</strong>
         </div>
-        ${m.emotional_notes ? `<div style="font-size: 0.8rem; color: var(--text-main); margin-top: 6px; font-style: italic;">"${escapeHTML(m.emotional_notes)}"</div>` : ''}
+        ${m.journal_entry ? `<div class="journal-content">📖 "${escapeHTML(m.journal_entry)}"</div>` : ''}
+        ${m.emotional_notes && !m.journal_entry ? `<div class="journal-content" style="font-style: italic;">"${escapeHTML(m.emotional_notes)}"</div>` : ''}
       </div>
     `).join('');
   } catch (err) {
-    showToast(err.message, 'error');
+    container.innerHTML = `<div style="color: #DC2626;">⚠️ ${err.message}</div>`;
   }
 }
 
+// Render 14-day mini Mood Calendar
+function renderMoodCalendar(records) {
+  const calContainer = document.getElementById('moodCalendarContainer');
+  if (!calContainer) return;
+
+  const moodMap = new Map();
+  records.forEach(r => moodMap.set(r.checkin_date, r));
+
+  const today = new Date();
+  const pastDays = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    pastDays.push(d.toISOString().split('T')[0]);
+  }
+
+  let html = `<div class="mood-calendar-grid">`;
+  pastDays.forEach(dateStr => {
+    const dayRecord = moodMap.get(dateStr);
+    const dayLabel = dateStr.substring(8);
+    html += `
+      <div class="mood-cal-cell" title="${dateStr}: ${dayRecord ? dayRecord.mood : 'Chưa ghi'}">
+        <span class="date-num">${dayLabel}</span>
+        <span class="mood-icon">${dayRecord ? dayRecord.emoji : '⚪'}</span>
+      </div>
+    `;
+  });
+  html += `</div>`;
+  calContainer.innerHTML = html;
+}
+
 // ==========================================
-// 6. PERSONAL HEALTH TIMELINE (Feature #3)
+// 6. PERSONAL HEALTH TIMELINE
 // ==========================================
 async function loadTimeline(range = '30days') {
+  const container = document.getElementById('timelineContainer');
+  container.innerHTML = `<div style="text-align: center; padding: 32px; color: var(--text-muted);">⌛ Đang tải dòng thời gian...</div>`;
+
   try {
     const res = await apiRequest(`/api/timeline?range=${range}`);
     const timeline = res.timeline || [];
-    const container = document.getElementById('timelineContainer');
 
     if (timeline.length === 0) {
       container.innerHTML = `
         <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-          <p>No historical timeline milestones found for this range yet.</p>
+          <p>Chưa có dữ liệu nào trong khoảng thời gian này.</p>
         </div>
       `;
       return;
@@ -989,30 +1169,30 @@ async function loadTimeline(range = '30days') {
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 8px;">
               ${h ? `
                 <div style="font-size: 0.82rem; color: var(--text-muted);">
-                  💤 Sleep: <strong>${h.sleep_duration ? h.sleep_duration + 'h' : '--'}</strong><br/>
-                  💧 Water: <strong>${h.water_intake ? h.water_intake + 'L' : '--'}</strong><br/>
-                  🏃 Exercised: <strong>${h.exercise_status || 'No'}</strong>
+                  💤 Giấc ngủ: <strong>${h.sleep_duration ? h.sleep_duration + 'h' : '--'}</strong><br/>
+                  💧 Nước uống: <strong>${h.water_intake ? h.water_intake + 'L' : '--'}</strong><br/>
+                  🏃 Vận động: <strong>${h.exercise_status || 'Không'}</strong> ${h.exercise_type ? '(' + h.exercise_type + ')' : ''}
                 </div>
-              ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">No physical check-in</div>'}
+              ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">Chưa điểm danh thể chất</div>'}
 
               ${m ? `
                 <div style="font-size: 0.82rem; color: var(--text-muted);">
-                  ⚡ Stress Level: <strong>${m.stress_level || '--'}/5</strong><br/>
-                  🌱 Motivation: <strong>${m.motivation_level || '--'}/5</strong><br/>
-                  🧘 Relaxed Score: <strong>${m.relaxed_score || '--'}/5</strong>
+                  ⚡ Căng thẳng: <strong>${m.stress_level || '--'}/5</strong><br/>
+                  🌱 Động lực: <strong>${m.motivation_level || '--'}/5</strong><br/>
+                  🧘 Thư thái: <strong>${m.relaxed_score || '--'}/5</strong>
                 </div>
-              ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">No emotional log</div>'}
+              ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">Chưa phản chiếu tâm trạng</div>'}
             </div>
 
             ${tasks.length > 0 ? `
               <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-color); font-size: 0.8rem; color: var(--text-muted);">
-                Completed tasks on this day: ${tasks.filter(t => t.status === 'completed').length} / ${tasks.length}
+                Đã hoàn thành ${tasks.filter(tItem => tItem.status === 'completed').length} / ${tasks.length} công việc
               </div>
             ` : ''}
 
-            ${(m && m.emotional_notes) ? `
-              <div style="margin-top: 8px; font-size: 0.82rem; font-style: italic; color: var(--text-main); background: var(--bg-main); padding: 8px; border-radius: var(--radius-sm);">
-                "${escapeHTML(m.emotional_notes)}"
+            ${(m && m.journal_entry) ? `
+              <div style="margin-top: 8px; font-size: 0.82rem; color: var(--text-main); background: var(--bg-main); padding: 8px; border-radius: var(--radius-sm); border-left: 3px solid var(--primary);">
+                📖 "${escapeHTML(m.journal_entry)}"
               </div>
             ` : ''}
           </div>
@@ -1020,7 +1200,6 @@ async function loadTimeline(range = '30days') {
       `;
     }).join('');
 
-    // Range tab binders
     document.querySelectorAll('[data-timeline-range]').forEach(btn => {
       btn.onclick = () => {
         document.querySelectorAll('[data-timeline-range]').forEach(b => b.classList.remove('active'));
@@ -1029,32 +1208,39 @@ async function loadTimeline(range = '30days') {
       };
     });
   } catch (err) {
-    showToast(err.message, 'error');
+    container.innerHTML = `<div style="color: #DC2626;">⚠️ ${err.message}</div>`;
   }
 }
 
 // ==========================================
 // 7. STATISTICS & CHARTS
 // ==========================================
-async function loadStatistics() {
-  try {
-    // 1. Weekly report summary (Feature #5)
-    loadWeeklyReport();
+async function loadStatistics(startDate = null, endDate = null) {
+  loadWeeklyReport();
 
-    // 2. Fetch raw series for Chart.js
-    const res = await apiRequest('/api/statistics?days=7');
+  let query = '/api/statistics?days=7';
+  if (startDate && endDate) {
+    query = `/api/statistics?startDate=${startDate}&endDate=${endDate}`;
+  }
+
+  try {
+    const res = await apiRequest(query);
     const stats = res.stats;
 
     // Productivity Category Chart
     const ctxCategory = document.getElementById('categoryChart').getContext('2d');
     if (AppState.charts.category) AppState.charts.category.destroy();
+
+    const catLabels = Object.keys(stats.categoryCounts);
+    const catData = Object.values(stats.categoryCounts);
+
     AppState.charts.category = new Chart(ctxCategory, {
       type: 'doughnut',
       data: {
-        labels: Object.keys(stats.categoryCounts),
+        labels: catLabels.length > 0 ? catLabels : ['Chưa có công việc'],
         datasets: [{
-          data: Object.values(stats.categoryCounts),
-          backgroundColor: ['#6C9CE8', '#A8D5BA', '#B8A5E8', '#FBBF24', '#38BDF8', '#94A3B8']
+          data: catData.length > 0 ? catData : [1],
+          backgroundColor: catLabels.length > 0 ? ['#6C9CE8', '#A8D5BA', '#B8A5E8', '#FBBF24', '#38BDF8', '#94A3B8'] : ['#CBD5E1']
         }]
       },
       options: {
@@ -1067,13 +1253,17 @@ async function loadStatistics() {
     // Mood distribution Chart
     const ctxMood = document.getElementById('moodChart').getContext('2d');
     if (AppState.charts.mood) AppState.charts.mood.destroy();
+
+    const moodLabels = Object.keys(stats.moodCounts);
+    const moodData = Object.values(stats.moodCounts);
+
     AppState.charts.mood = new Chart(ctxMood, {
       type: 'pie',
       data: {
-        labels: Object.keys(stats.moodCounts),
+        labels: moodLabels.length > 0 ? moodLabels : ['Chưa có dữ liệu'],
         datasets: [{
-          data: Object.values(stats.moodCounts),
-          backgroundColor: ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280']
+          data: moodData.length > 0 ? moodData : [1],
+          backgroundColor: moodLabels.length > 0 ? ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'] : ['#CBD5E1']
         }]
       },
       options: {
@@ -1092,10 +1282,10 @@ async function loadStatistics() {
     AppState.charts.sleep = new Chart(ctxSleep, {
       type: 'bar',
       data: {
-        labels: sleepDates.length > 0 ? sleepDates : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        labels: sleepDates.length > 0 ? sleepDates : ['Chưa có'],
         datasets: [{
-          label: 'Hours Slept',
-          data: sleepHours.length > 0 ? sleepHours : [7.5, 7.0, 6.5, 8.0, 7.0, 6.0, 7.5],
+          label: AppState.language === 'vi' ? 'Số giờ ngủ' : 'Hours Slept',
+          data: sleepHours.length > 0 ? sleepHours : [0],
           backgroundColor: '#6C9CE8',
           borderRadius: 6
         }]
@@ -1117,17 +1307,17 @@ async function loadStatistics() {
     AppState.charts.stress = new Chart(ctxStress, {
       type: 'line',
       data: {
-        labels: moodDates.length > 0 ? moodDates : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+        labels: moodDates.length > 0 ? moodDates : ['Chưa có'],
         datasets: [
           {
-            label: 'Stress (1-5)',
-            data: stressVals.length > 0 ? stressVals : [2, 2, 3, 1, 2, 4, 2],
+            label: AppState.language === 'vi' ? 'Căng thẳng (1-5)' : 'Stress (1-5)',
+            data: stressVals.length > 0 ? stressVals : [0],
             borderColor: '#EF4444',
             tension: 0.3
           },
           {
-            label: 'Motivation (1-5)',
-            data: motVals.length > 0 ? motVals : [4, 5, 3, 5, 4, 2, 4],
+            label: AppState.language === 'vi' ? 'Động lực (1-5)' : 'Motivation (1-5)',
+            data: motVals.length > 0 ? motVals : [0],
             borderColor: '#10B981',
             tension: 0.3
           }
@@ -1139,35 +1329,51 @@ async function loadStatistics() {
         scales: { y: { min: 1, max: 5 } }
       }
     });
+
+    // Filter button handlers
+    document.getElementById('btnApplyStatsFilter').onclick = () => {
+      const s = document.getElementById('statsStartDate').value;
+      const e = document.getElementById('statsEndDate').value;
+      if (!s || !e) {
+        showToast('Vui lòng chọn cả ngày bắt đầu và kết thúc', 'error');
+        return;
+      }
+      loadStatistics(s, e);
+    };
+
+    document.getElementById('btnResetStatsFilter').onclick = () => {
+      document.getElementById('statsStartDate').value = '';
+      document.getElementById('statsEndDate').value = '';
+      loadStatistics();
+    };
   } catch (err) {
     showToast(err.message, 'error');
   }
 }
 
-// Feature #5: Weekly Report Loader
 async function loadWeeklyReport() {
   try {
     const res = await apiRequest('/api/reports/weekly');
     const rep = res.report;
     const summaryText = `
       "${rep.message}"<br/><br/>
-      • <strong>Tasks Completed:</strong> ${rep.completedTasks} / ${rep.totalTasks} (${rep.completionRate}%)<br/>
-      • <strong>Average Sleep:</strong> ${rep.avgSleep} hours/day<br/>
-      • <strong>Positive Mood Days:</strong> ${rep.positiveMoodDays} out of 7 days<br/>
-      • <strong>Average Stress Level:</strong> ${rep.avgStress} / 5<br/><br/>
+      • <strong>${t('completedTasks')}:</strong> ${rep.completedTasks} / ${rep.totalTasks} (${rep.completionRate}%)<br/>
+      • <strong>${AppState.language === 'vi' ? 'Giấc ngủ trung bình' : 'Average Sleep'}:</strong> ${rep.avgSleep} ${AppState.language === 'vi' ? 'giờ/ngày' : 'hours/day'}<br/>
+      • <strong>${AppState.language === 'vi' ? 'Ngày có tâm trạng tích cực' : 'Positive Mood Days'}:</strong> ${rep.positiveMoodDays} / 7 ${AppState.language === 'vi' ? 'ngày' : 'days'}<br/>
+      • <strong>${AppState.language === 'vi' ? 'Mức căng thẳng trung bình' : 'Average Stress'}:</strong> ${rep.avgStress} / 5<br/><br/>
       💡 <em>${rep.encouragement}</em>
     `;
     document.getElementById('weeklyReportSummaryText').innerHTML = summaryText;
 
     document.getElementById('btnRefreshWeeklyReport').onclick = () => {
       loadWeeklyReport();
-      showToast('Weekly personal report refreshed.');
+      showToast(AppState.language === 'vi' ? 'Đã làm mới báo cáo.' : 'Report refreshed.');
     };
   } catch (e) {}
 }
 
 // ==========================================
-// 8. AI WELLNESS ASSISTANT (Feature #2)
+// 8. MULTI-MODE AI WELLNESS ASSISTANT
 // ==========================================
 function bindAiChat() {
   const drawer = document.getElementById('aiChatDrawer');
@@ -1177,11 +1383,23 @@ function bindAiChat() {
   const input = document.getElementById('aiChatInput');
   const msgArea = document.getElementById('aiChatMessages');
 
-  openBtn.addEventListener('click', () => {
-    drawer.classList.toggle('active');
-  });
-  closeBtn.addEventListener('click', () => {
-    drawer.classList.remove('active');
+  openBtn.addEventListener('click', () => { drawer.classList.toggle('active'); });
+  closeBtn.addEventListener('click', () => { drawer.classList.remove('active'); });
+
+  // Mode buttons
+  document.querySelectorAll('#aiModeTabs .ai-mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#aiModeTabs .ai-mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      AppState.aiMode = btn.getAttribute('data-ai-mode');
+      
+      const prompts = {
+        schedule: AppState.language === 'vi' ? 'Hãy phân tích lịch trình hôm nay và đề xuất giờ nghỉ giúp tôi.' : 'Analyze my schedule today and suggest breaks.',
+        wellness: AppState.language === 'vi' ? 'Gợi ý bài tập thở và cách giảm căng thẳng hiệu quả.' : 'Suggest breathing exercises and mindful relaxation tips.',
+        insight: AppState.language === 'vi' ? 'Tổng hợp góc nhìn sức khỏe từ dữ liệu tuần qua của tôi.' : 'Summarize personal health insights from my recent logs.'
+      };
+      input.value = prompts[AppState.aiMode] || '';
+    });
   });
 
   form.addEventListener('submit', async (e) => {
@@ -1189,23 +1407,20 @@ function bindAiChat() {
     const userMsg = input.value.trim();
     if (!userMsg) return;
 
-    // Append user message to chat UI
     appendChatBubble('user', userMsg);
     input.value = '';
 
-    // Assistant loading state
-    const loadingBubble = appendChatBubble('assistant', 'LifeCare AI is thinking with mindfulness...');
+    const loadingBubble = appendChatBubble('assistant', AppState.language === 'vi' ? 'LifeCare AI đang suy nghĩ...' : 'LifeCare AI is reflecting...');
 
     try {
       const res = await apiRequest('/api/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ message: userMsg })
+        body: JSON.stringify({ message: userMsg, mode: AppState.aiMode, language: AppState.language })
       });
 
       loadingBubble.remove();
       appendChatBubble('assistant', res.reply);
 
-      // If suggested tasks are returned, offer to add them
       if (res.suggestedTasks && res.suggestedTasks.length > 0) {
         const suggestionDiv = document.createElement('div');
         suggestionDiv.style.padding = '8px 12px';
@@ -1214,14 +1429,14 @@ function bindAiChat() {
         suggestionDiv.style.borderRadius = 'var(--radius-sm)';
         suggestionDiv.style.marginTop = '6px';
         suggestionDiv.innerHTML = `
-          <strong>Suggested Habit Task:</strong> "${res.suggestedTasks[0].title}"
-          <br/><button class="btn btn-primary" style="font-size: 0.72rem; padding: 4px 8px; margin-top: 4px;" onclick='addAiSuggestedTask(${JSON.stringify(res.suggestedTasks[0]).replace(/'/g, "&#39;")})'>+ Add to Today's Planner</button>
+          <strong>${t('addAiTaskBtn')}:</strong> "${res.suggestedTasks[0].title}"
+          <br/><button class="btn btn-primary" style="font-size: 0.72rem; padding: 4px 8px; margin-top: 4px;" onclick='addAiSuggestedTask(${JSON.stringify(res.suggestedTasks[0]).replace(/'/g, "&#39;")})'>+ Thêm vào Lịch</button>
         `;
         msgArea.appendChild(suggestionDiv);
         msgArea.scrollTop = msgArea.scrollHeight;
       }
     } catch (err) {
-      loadingBubble.innerText = 'Sorry, could not reach the wellness engine: ' + err.message;
+      loadingBubble.innerText = 'Lỗi kết nối: ' + err.message;
     }
   });
 }
@@ -1242,7 +1457,7 @@ window.addAiSuggestedTask = async function(task) {
       method: 'POST',
       body: JSON.stringify({
         title: task.title,
-        description: task.description || 'Generated by LifeCare AI Assistant',
+        description: task.description || 'Generated by LifeCare AI',
         category: task.category || 'Rest',
         priority: task.priority || 'medium',
         date: new Date().toISOString().split('T')[0],
@@ -1250,7 +1465,7 @@ window.addAiSuggestedTask = async function(task) {
         end_time: '14:45'
       })
     });
-    showToast('Suggested task added to your planner!');
+    showToast(AppState.language === 'vi' ? 'Đã thêm việc gợi ý vào lịch!' : 'Suggested task added to planner!');
     loadPlanner();
     if (AppState.activeView === 'dashboard') loadDashboard();
   } catch (err) {
@@ -1262,7 +1477,6 @@ window.addAiSuggestedTask = async function(task) {
 // 9. SETTINGS & PRIVACY CONTROLLER
 // ==========================================
 function bindSettings() {
-  // Update Profile Form
   document.getElementById('profileForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1278,13 +1492,12 @@ function bindSettings() {
 
       AppState.user = res.user;
       updateUserUI();
-      showToast('Profile updated successfully.');
+      showToast(AppState.language === 'vi' ? 'Đã cập nhật hồ sơ.' : 'Profile updated.');
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 
-  // Change Password Form
   document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1298,13 +1511,12 @@ function bindSettings() {
 
       document.getElementById('curPassword').value = '';
       document.getElementById('newPassword').value = '';
-      showToast('Password updated securely.');
+      showToast(AppState.language === 'vi' ? 'Mật khẩu đã được thay đổi an toàn.' : 'Password updated securely.');
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 
-  // Reminder Settings Form
   document.getElementById('settingsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
@@ -1316,6 +1528,7 @@ function bindSettings() {
       const quiet_hours_start = document.getElementById('setQuietStart').value;
       const quiet_hours_end = document.getElementById('setQuietEnd').value;
       const notification_frequency = document.getElementById('setFrequency').value;
+      const language = document.getElementById('setLanguage').value;
 
       await apiRequest('/api/user/settings', {
         method: 'PUT',
@@ -1327,27 +1540,27 @@ function bindSettings() {
           remind_tasks,
           quiet_hours_start,
           quiet_hours_end,
-          notification_frequency
+          notification_frequency,
+          language
         })
       });
 
-      showToast('Notification & habit preferences saved.');
+      applyLanguage(language);
+      showToast(AppState.language === 'vi' ? 'Đã lưu tùy chọn thói quen.' : 'Preferences saved.');
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 
-  // Export Data (JSON)
   document.getElementById('btnExportData').addEventListener('click', () => {
     window.location.href = '/api/user/export';
   });
 
-  // Clear Health & Mood History
   document.getElementById('btnClearHealthHistory').addEventListener('click', async () => {
-    if (confirm('Are you sure you want to delete all physical check-ins and mood records? This action cannot be undone.')) {
+    if (confirm(AppState.language === 'vi' ? 'Bạn có chắc chắn muốn xóa toàn bộ lịch sử sức khỏe và tâm trạng?' : 'Clear all health and mood logs?')) {
       try {
         await apiRequest('/api/user/clear-health', { method: 'POST' });
-        showToast('Health and mood history permanently cleared.');
+        showToast(AppState.language === 'vi' ? 'Đã xóa dữ liệu thành công.' : 'History cleared.');
         loadDashboard();
       } catch (err) {
         showToast(err.message, 'error');
@@ -1355,13 +1568,12 @@ function bindSettings() {
     }
   });
 
-  // Delete Account
   document.getElementById('btnDeleteAccount').addEventListener('click', async () => {
-    const confirmation = prompt('Type "DELETE" to permanently erase your account and all private records:');
+    const confirmation = prompt(AppState.language === 'vi' ? 'Nhập chữ "DELETE" để xác nhận xóa vĩnh viễn tài khoản:' : 'Type "DELETE" to confirm permanent deletion:');
     if (confirmation === 'DELETE') {
       try {
         await apiRequest('/api/user/account', { method: 'DELETE' });
-        alert('Your LifeCare account has been completely erased.');
+        alert(AppState.language === 'vi' ? 'Tài khoản của bạn đã được xóa hoàn toàn.' : 'Account deleted permanently.');
         localStorage.clear();
         location.reload();
       } catch (err) {
@@ -1370,7 +1582,6 @@ function bindSettings() {
     }
   });
 
-  // Notification bell modal
   const notifModal = document.getElementById('notifModal');
   document.getElementById('notifBellBtn').addEventListener('click', async () => {
     notifModal.classList.add('active');
@@ -1379,14 +1590,14 @@ function bindSettings() {
       const container = document.getElementById('notifListContainer');
       const notifs = res.notifications || [];
       if (notifs.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">All caught up! No unread habit alerts.</p>';
+        container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">${AppState.language === 'vi' ? 'Không có thông báo mới.' : 'No new notifications.'}</p>`;
         return;
       }
       container.innerHTML = notifs.map(n => `
         <div style="background: var(--bg-main); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
           <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${escapeHTML(n.title)}</div>
           <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 2px;">${escapeHTML(n.message)}</div>
-          <div style="font-size: 0.72rem; color: var(--primary); margin-top: 4px;">Scheduled: ${n.notification_time}</div>
+          <div style="font-size: 0.72rem; color: var(--primary); margin-top: 4px;">⏰ ${n.notification_time}</div>
         </div>
       `).join('');
     } catch (e) {}
@@ -1418,6 +1629,7 @@ async function loadSettings() {
       if (s.quiet_hours_start) document.getElementById('setQuietStart').value = s.quiet_hours_start;
       if (s.quiet_hours_end) document.getElementById('setQuietEnd').value = s.quiet_hours_end;
       if (s.notification_frequency) document.getElementById('setFrequency').value = s.notification_frequency;
+      if (s.language) document.getElementById('setLanguage').value = s.language;
     }
   } catch (e) {}
 }
