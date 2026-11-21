@@ -11,3 +11,4 @@ data/*.json
 
 # Vercel deployment cache
 .vercel/
+.vercel
