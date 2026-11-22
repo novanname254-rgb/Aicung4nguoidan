@@ -1,26 +1,117 @@
-const { DatabaseSync } = require('node:sqlite');
+const { createClient } = require('@libsql/client');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 
-const DB_PATH = process.env.VERCEL 
-  ? path.join('/tmp', 'lifecare.sqlite') 
-  : path.join(__dirname, '..', 'data', 'lifecare.sqlite');
+// Turso / Turbo Database configuration
+const TURSO_URL = process.env.TURSO_DATABASE_URL || process.env.TURBO_DATABASE_URL || process.env.TURSO_URL;
+const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN || process.env.TURBO_AUTH_TOKEN || process.env.TURSO_TOKEN;
 
-function initDatabase() {
-  const dataDir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+let _clientInstance = null;
+let _isInitialized = false;
+
+function isTursoConfigured() {
+  return Boolean(TURSO_URL);
+}
+
+function getClient() {
+  if (_clientInstance) {
+    return _clientInstance;
   }
 
-  const db = new DatabaseSync(DB_PATH);
+  if (TURSO_URL) {
+    console.log(`[LifeCare DB] Initializing Turso Cloud Database connection: ${TURSO_URL}`);
+    _clientInstance = createClient({
+      url: TURSO_URL,
+      authToken: TURSO_AUTH_TOKEN || undefined
+    });
+  } else {
+    const dbPath = process.env.VERCEL 
+      ? path.join('/tmp', 'lifecare.sqlite') 
+      : path.join(__dirname, '..', 'data', 'lifecare.sqlite');
 
-  // Enable foreign keys & WAL mode
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-    PRAGMA journal_mode = WAL;
+    const dataDir = path.dirname(dbPath);
+    if (!fs.existsSync(dataDir)) {
+      try {
+        fs.mkdirSync(dataDir, { recursive: true });
+      } catch (e) {
+        console.warn('[LifeCare DB] Note creating directory:', e.message);
+      }
+    }
 
-    -- 1. Users table
+    console.log(`[LifeCare DB] Using local SQLite database file: ${dbPath}`);
+    _clientInstance = createClient({
+      url: 'file:' + path.resolve(dbPath)
+    });
+  }
+
+  return _clientInstance;
+}
+
+// Unified Database Adapter matching SQLite prepare().get / .all / .run & exec()
+const db = {
+  isTurso: () => isTursoConfigured(),
+  
+  async execute(stmt) {
+    const client = getClient();
+    return client.execute(stmt);
+  },
+
+  async exec(sql) {
+    const client = getClient();
+    // Split SQL into individual statements safely
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    for (const stmt of statements) {
+      try {
+        await client.execute(stmt);
+      } catch (err) {
+        // Log pragma or already exists warnings gracefully
+        if (!stmt.toUpperCase().startsWith('PRAGMA')) {
+          console.warn('[LifeCare DB] exec statement warning:', err.message, '| Statement:', stmt.substring(0, 80));
+        }
+      }
+    }
+  },
+
+  prepare(sql) {
+    const client = getClient();
+    return {
+      async get(...args) {
+        const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const rs = await client.execute({ sql, args: flatArgs });
+        return rs.rows && rs.rows.length > 0 ? rs.rows[0] : null;
+      },
+      async all(...args) {
+        const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const rs = await client.execute({ sql, args: flatArgs });
+        return rs.rows || [];
+      },
+      async run(...args) {
+        const flatArgs = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+        const rs = await client.execute({ sql, args: flatArgs });
+        return {
+          changes: rs.rowsAffected || 0,
+          lastInsertRowid: rs.lastInsertRowid
+        };
+      }
+    };
+  }
+};
+
+async function initDatabase() {
+  if (_isInitialized) return db;
+
+  // 1. Pragmas (if supported)
+  try {
+    await db.exec('PRAGMA foreign_keys = ON;');
+  } catch (e) {}
+
+  // 2. Base Schema Creation
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -35,7 +126,6 @@ function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
-    -- 2. User Settings table
     CREATE TABLE IF NOT EXISTS user_settings (
       id TEXT PRIMARY KEY,
       user_id TEXT UNIQUE NOT NULL,
@@ -53,71 +143,67 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 3. Tasks / Events table
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
       description TEXT,
-      category TEXT NOT NULL, -- 'Study', 'Work', 'Exercise', 'Personal', 'Rest', 'Other'
-      priority TEXT NOT NULL, -- 'low', 'medium', 'high'
-      date TEXT NOT NULL, -- 'YYYY-MM-DD'
-      start_time TEXT, -- 'HH:mm'
-      end_time TEXT, -- 'HH:mm'
-      status TEXT DEFAULT 'pending', -- 'pending', 'completed'
+      category TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      date TEXT NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      status TEXT DEFAULT 'pending',
       is_event INTEGER DEFAULT 0,
       reminder_time TEXT,
-      recurring TEXT DEFAULT 'none', -- 'none', 'daily', 'weekly', 'monthly'
+      recurring TEXT DEFAULT 'none',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 4. Physical Health Check-ins
     CREATE TABLE IF NOT EXISTS health_checkins (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      checkin_date TEXT NOT NULL, -- 'YYYY-MM-DD'
-      sleep_duration REAL, -- in hours
-      sleep_quality TEXT, -- 'Very Good', 'Good', 'Average', 'Poor', 'Very Poor'
-      physical_condition TEXT, -- 'Very Good', 'Good', 'Normal', 'Tired', 'Unwell'
-      energy_level INTEGER, -- 1 to 5
-      exercise_status TEXT, -- 'Yes', 'No'
-      exercise_type TEXT, -- 'running', 'yoga', 'gym', 'walking', 'cycling', 'other'
-      exercise_duration INTEGER DEFAULT 0, -- in minutes
-      meals_summary TEXT, -- e.g. 'Breakfast: oatmeal, Lunch: salad, Dinner: fish'
-      water_intake REAL, -- in liters
+      checkin_date TEXT NOT NULL,
+      sleep_duration REAL,
+      sleep_quality TEXT,
+      physical_condition TEXT,
+      energy_level INTEGER,
+      exercise_status TEXT,
+      exercise_type TEXT,
+      exercise_duration INTEGER DEFAULT 0,
+      meals_summary TEXT,
+      water_intake REAL,
       discomfort TEXT,
       notes TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 5. Mental Health & Mood Check-ins
     CREATE TABLE IF NOT EXISTS mood_checkins (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      checkin_date TEXT NOT NULL, -- 'YYYY-MM-DD'
-      mood TEXT NOT NULL, -- 'Happy', 'Excited', 'Relaxed', 'Normal', 'Tired', 'Stressed', 'Sad', 'Anxious', 'Overwhelmed'
+      checkin_date TEXT NOT NULL,
+      mood TEXT NOT NULL,
       emoji TEXT,
-      stress_level INTEGER, -- 1 to 5
-      motivation_level INTEGER, -- 1 to 5
-      connected_score INTEGER, -- 1 to 5
-      relaxed_score INTEGER, -- 1 to 5
-      anxiety_score INTEGER, -- 1 to 5
+      stress_level INTEGER,
+      motivation_level INTEGER,
+      connected_score INTEGER,
+      relaxed_score INTEGER,
+      anxiety_score INTEGER,
       emotional_notes TEXT,
-      journal_entry TEXT, -- Detailed personal emotional journal reflection
+      journal_entry TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 6. Notifications / Reminders log
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
       message TEXT NOT NULL,
-      notification_type TEXT NOT NULL, -- 'schedule', 'health', 'mental', 'system'
+      notification_type TEXT NOT NULL,
       notification_time TEXT NOT NULL,
       is_read INTEGER DEFAULT 0,
       is_enabled INTEGER DEFAULT 1,
@@ -125,7 +211,6 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 7. User Sessions table
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -134,7 +219,6 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 8. Password reset tokens
     CREATE TABLE IF NOT EXISTS password_resets (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -143,17 +227,15 @@ function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- 9. AI Wellness Chat History
     CREATE TABLE IF NOT EXISTS ai_chats (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
-      role TEXT NOT NULL, -- 'user', 'assistant'
+      role TEXT NOT NULL,
       message TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    -- Indices for fast querying
     CREATE INDEX IF NOT EXISTS idx_tasks_user_date ON tasks(user_id, date);
     CREATE INDEX IF NOT EXISTS idx_health_user_date ON health_checkins(user_id, checkin_date);
     CREATE INDEX IF NOT EXISTS idx_mood_user_date ON mood_checkins(user_id, checkin_date);
@@ -161,48 +243,42 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   `);
 
-  // Run dynamic schema migrations for existing databases
-  runMigrations(db);
+  // 3. Schema Migrations for legacy columns
+  await runMigrations(db);
 
+  _isInitialized = true;
   return db;
 }
 
-function runMigrations(db) {
+async function runMigrations(database) {
   try {
-    // Migration for tasks: recurring
-    const taskCols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
+    const taskCols = (await database.prepare("PRAGMA table_info(tasks)").all()).map(c => c.name);
     if (!taskCols.includes('recurring')) {
-      db.exec("ALTER TABLE tasks ADD COLUMN recurring TEXT DEFAULT 'none'");
+      await database.exec("ALTER TABLE tasks ADD COLUMN recurring TEXT DEFAULT 'none'");
     }
 
-    // Migration for health_checkins: exercise_type, exercise_duration, meals_summary
-    const healthCols = db.prepare("PRAGMA table_info(health_checkins)").all().map(c => c.name);
+    const healthCols = (await database.prepare("PRAGMA table_info(health_checkins)").all()).map(c => c.name);
     if (!healthCols.includes('exercise_type')) {
-      db.exec("ALTER TABLE health_checkins ADD COLUMN exercise_type TEXT");
+      await database.exec("ALTER TABLE health_checkins ADD COLUMN exercise_type TEXT");
     }
     if (!healthCols.includes('exercise_duration')) {
-      db.exec("ALTER TABLE health_checkins ADD COLUMN exercise_duration INTEGER DEFAULT 0");
+      await database.exec("ALTER TABLE health_checkins ADD COLUMN exercise_duration INTEGER DEFAULT 0");
     }
     if (!healthCols.includes('meals_summary')) {
-      db.exec("ALTER TABLE health_checkins ADD COLUMN meals_summary TEXT");
+      await database.exec("ALTER TABLE health_checkins ADD COLUMN meals_summary TEXT");
     }
 
-    // Migration for mood_checkins: journal_entry
-    const moodCols = db.prepare("PRAGMA table_info(mood_checkins)").all().map(c => c.name);
+    const moodCols = (await database.prepare("PRAGMA table_info(mood_checkins)").all()).map(c => c.name);
     if (!moodCols.includes('journal_entry')) {
-      db.exec("ALTER TABLE mood_checkins ADD COLUMN journal_entry TEXT");
+      await database.exec("ALTER TABLE mood_checkins ADD COLUMN journal_entry TEXT");
     }
   } catch (err) {
-    console.error('Database migration note:', err.message);
+    console.log('[LifeCare DB] Migration status:', err.message);
   }
 }
 
-let _dbInstance = null;
 function getDb() {
-  if (!_dbInstance) {
-    _dbInstance = initDatabase();
-  }
-  return _dbInstance;
+  return db;
 }
 
 // Password hashing helper (PBKDF2 with salt)
@@ -221,6 +297,8 @@ function verifyPassword(password, storedHash, salt) {
 
 module.exports = {
   getDb,
+  initDatabase,
+  isTursoConfigured,
   hashPassword,
   verifyPassword
 };

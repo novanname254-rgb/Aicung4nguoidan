@@ -293,6 +293,17 @@ function updateUserUI() {
 // 1. AUTHENTICATION CONTROLLER
 // ==========================================
 function bindAuthEvents() {
+  const closeBtn = document.getElementById('authModalClose');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => showAuthModal(false));
+  }
+  const skipBtn = document.getElementById('skipAuthBtn');
+  if (skipBtn) {
+    skipBtn.addEventListener('click', () => {
+      showAuthModal(false);
+      showToast(AppState.language === 'vi' ? 'Tiếp tục với chế độ Khách' : 'Continuing as Guest');
+    });
+  }
   const modal = document.getElementById('authModal');
   const loginForm = document.getElementById('loginForm');
   const registerForm = document.getElementById('registerForm');

@@ -33,18 +33,21 @@
           <h3 id="authModalTitle" data-i18n="signInTitle">Đăng Nhập LifeCare</h3>
           <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;" data-i18n="brandTagline">Cuộc Sống & Sự Cân Bằng</p>
         </div>
-        <button class="modal-close" id="authModalClose" style="display: none;">✕</button>
+        <button class="modal-close" id="authModalClose">✕</button>
       </div>
 
       <!-- Login Form -->
       <form id="loginForm">
+        <div style="background: rgba(108, 156, 232, 0.12); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 0.85rem; color: var(--primary);">
+          ✨ <strong>Chế độ mở:</strong> Đã tạm thời bỏ yêu cầu đăng nhập bằng email. Bạn có thể sử dụng ngay mà không cần tài khoản!
+        </div>
         <div class="form-group">
           <label data-i18n="email">Địa chỉ Email</label>
-          <input type="email" id="loginEmail" class="form-control" placeholder="alex.balance@lifecare.app" required />
+          <input type="email" id="loginEmail" class="form-control" placeholder="alex.balance@lifecare.app" />
         </div>
         <div class="form-group">
           <label data-i18n="password">Mật khẩu</label>
-          <input type="password" id="loginPassword" class="form-control" placeholder="••••••••" required />
+          <input type="password" id="loginPassword" class="form-control" placeholder="••••••••" />
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; font-size: 0.82rem;">
           <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-muted);">
@@ -53,6 +56,7 @@
           <a href="#" id="showForgotLink" style="color: var(--primary); text-decoration: none; font-weight: 600;" data-i18n="forgotPassword">Quên mật khẩu?</a>
         </div>
         <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="signInBtn">Đăng Nhập</button>
+        <button type="button" id="skipAuthBtn" class="btn btn-outline" style="width: 100%; margin-top: 10px;">⚡ Sử dụng ngay không cần đăng nhập</button>
         <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
           <span data-i18n="createOneFree">Chưa có tài khoản?</span> <a href="#" id="showRegisterLink" style="color: var(--primary); font-weight: 700; text-decoration: none;" data-i18n="createAccountBtn">Đăng ký ngay</a>
         </p>

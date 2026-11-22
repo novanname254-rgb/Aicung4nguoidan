@@ -4,8 +4,8 @@ const path = require('node:path');
 const url = require('node:url');
 const crypto = require('node:crypto');
 
-const { getDb, hashPassword, verifyPassword } = require('./server/db');
-const { ensureDemoUser, createSession, getUserFromSession, deleteSession } = require('./server/auth');
+const { getDb, initDatabase, isTursoConfigured, hashPassword, verifyPassword } = require('./server/db');
+const { ensureDemoUser, getDefaultUser, createSession, getUserFromSession, deleteSession } = require('./server/auth');
 const { generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
 
 const PORT = process.env.PORT || 3000;
@@ -61,7 +61,7 @@ function parseBody(req) {
 }
 
 // Authentication middleware helper
-function getAuthUser(req) {
+async function getAuthUser(req) {
   const authHeader = req.headers['authorization'] || '';
   let token = '';
   if (authHeader.startsWith('Bearer ')) {
@@ -70,11 +70,26 @@ function getAuthUser(req) {
     const match = req.headers['cookie'].match(/lifecare_session=([^;]+)/);
     if (match) token = match[1];
   }
-  return getUserFromSession(token);
+  if (token && token !== 'guest_token_lifecare') {
+    const user = await getUserFromSession(token);
+    if (user) return user;
+  }
+  // BYPASS: Temporarily remove requirement for email login
+  return await getDefaultUser();
 }
 
 // Main HTTP request router
+let _serverInitialized = false;
 async function handleRequest(req, res) {
+  if (!_serverInitialized) {
+    try {
+      await initDatabase();
+      await ensureDemoUser();
+      _serverInitialized = true;
+    } catch (e) {
+      console.warn('[LifeCare Server] DB init note:', e.message);
+    }
+  }
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
@@ -111,7 +126,7 @@ async function handleRequest(req, res) {
         }
 
         const cleanEmail = email.trim().toLowerCase();
-        const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
+        const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(cleanEmail);
         if (existing) {
           return sendJSON(res, 409, { success: false, message: 'An account with this email already exists.' });
         }
@@ -120,7 +135,7 @@ async function handleRequest(req, res) {
         const { hash, salt } = hashPassword(password);
         const now = new Date().toISOString();
 
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO users (id, email, password_hash, salt, full_name, avatar, dob, gender, personal_goals, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
@@ -138,13 +153,13 @@ async function handleRequest(req, res) {
         );
 
         // Create default settings
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO user_settings (id, user_id, theme, language, updated_at)
           VALUES (?, ?, 'light', 'en', ?)
         `).run('set_' + crypto.randomUUID(), userId, now);
 
-        const { token } = createSession(userId);
-        const user = db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at FROM users WHERE id = ?').get(userId);
+        const { token } = await createSession(userId);
+        const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at FROM users WHERE id = ?').get(userId);
 
         return sendJSON(res, 201, {
           success: true,
@@ -164,12 +179,12 @@ async function handleRequest(req, res) {
         }
 
         const cleanEmail = email.trim().toLowerCase();
-        const user = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
+        const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
         if (!user || !verifyPassword(password, user.password_hash, user.salt)) {
           return sendJSON(res, 401, { success: false, message: 'Invalid email or password.' });
         }
 
-        const { token } = createSession(user.id);
+        const { token } = await createSession(user.id);
         const safeUser = {
           id: user.id,
           email: user.email,
@@ -193,7 +208,7 @@ async function handleRequest(req, res) {
       if (pathname === '/api/auth/logout' && method === 'POST') {
         const authHeader = req.headers['authorization'] || '';
         const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
-        if (token) deleteSession(token);
+        if (token) await deleteSession(token);
         return sendJSON(res, 200, { success: true, message: 'Logged out successfully.' });
       }
 
@@ -203,7 +218,7 @@ async function handleRequest(req, res) {
         const { email } = body;
         if (!email) return sendJSON(res, 400, { success: false, message: 'Email is required.' });
 
-        const user = db.prepare('SELECT id, full_name FROM users WHERE email = ?').get(email.trim().toLowerCase());
+        const user = await db.prepare('SELECT id, full_name FROM users WHERE email = ?').get(email.trim().toLowerCase());
         if (!user) {
           // Standard security response: don't reveal email existence
           return sendJSON(res, 200, { success: true, message: 'If this email exists in our records, password reset instructions have been generated.' });
@@ -211,7 +226,7 @@ async function handleRequest(req, res) {
 
         const resetToken = 'rst_' + crypto.randomBytes(24).toString('hex');
         const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
-        db.prepare('INSERT INTO password_resets (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)').run(
+        await db.prepare('INSERT INTO password_resets (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)').run(
           resetToken, user.id, expiresAt, new Date().toISOString()
         );
 
@@ -230,37 +245,36 @@ async function handleRequest(req, res) {
           return sendJSON(res, 400, { success: false, message: 'Token and new password are required.' });
         }
 
-        const resetRecord = db.prepare('SELECT user_id, expires_at FROM password_resets WHERE token = ?').get(token);
+        const resetRecord = await db.prepare('SELECT user_id, expires_at FROM password_resets WHERE token = ?').get(token);
         if (!resetRecord || Date.now() > resetRecord.expires_at) {
           return sendJSON(res, 400, { success: false, message: 'Reset token is invalid or has expired.' });
         }
 
         const { hash, salt } = hashPassword(new_password);
-        db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
+        await db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
           hash, salt, new Date().toISOString(), resetRecord.user_id
         );
-        db.prepare('DELETE FROM password_resets WHERE token = ?').run(token);
+        await db.prepare('DELETE FROM password_resets WHERE token = ?').run(token);
 
         return sendJSON(res, 200, { success: true, message: 'Password updated successfully. You may now log in.' });
       }
 
       // GET /api/auth/me
       if (pathname === '/api/auth/me' && method === 'GET') {
-        const user = getAuthUser(req);
-        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized. Please sign in.' });
-        return sendJSON(res, 200, { success: true, user });
+        const user = (await getAuthUser(req)) || (await getDefaultUser());
+        return sendJSON(res, 200, { success: true, user, token: 'guest_token_lifecare' });
       }
 
       // PUT /api/user/profile
       if (pathname === '/api/user/profile' && method === 'PUT') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
         const { full_name, dob, gender, personal_goals, avatar } = body;
         const now = new Date().toISOString();
 
-        db.prepare(`
+        await db.prepare(`
           UPDATE users
           SET full_name = COALESCE(?, full_name),
               dob = COALESCE(?, dob),
@@ -271,13 +285,13 @@ async function handleRequest(req, res) {
           WHERE id = ?
         `).run(full_name, dob, gender, personal_goals, avatar, now, user.id);
 
-        const updated = db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at FROM users WHERE id = ?').get(user.id);
+        const updated = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at FROM users WHERE id = ?').get(user.id);
         return sendJSON(res, 200, { success: true, message: 'Profile updated successfully.', user: updated });
       }
 
       // PUT /api/user/password
       if (pathname === '/api/user/password' && method === 'PUT') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
@@ -286,13 +300,13 @@ async function handleRequest(req, res) {
           return sendJSON(res, 400, { success: false, message: 'Current and new password are required.' });
         }
 
-        const fullUser = db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(user.id);
+        const fullUser = await db.prepare('SELECT password_hash, salt FROM users WHERE id = ?').get(user.id);
         if (!verifyPassword(current_password, fullUser.password_hash, fullUser.salt)) {
           return sendJSON(res, 400, { success: false, message: 'Incorrect current password.' });
         }
 
         const { hash, salt } = hashPassword(new_password);
-        db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
+        await db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
           hash, salt, new Date().toISOString(), user.id
         );
 
@@ -301,14 +315,14 @@ async function handleRequest(req, res) {
 
       // GET & PUT /api/user/settings
       if (pathname === '/api/user/settings') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         if (method === 'GET') {
-          let settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+          let settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
           if (!settings) {
-            db.prepare('INSERT INTO user_settings (id, user_id, updated_at) VALUES (?, ?, ?)').run('set_' + crypto.randomUUID(), user.id, new Date().toISOString());
-            settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+            await db.prepare('INSERT INTO user_settings (id, user_id, updated_at) VALUES (?, ?, ?)').run('set_' + crypto.randomUUID(), user.id, new Date().toISOString());
+            settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
           }
           return sendJSON(res, 200, { success: true, settings });
         }
@@ -316,7 +330,7 @@ async function handleRequest(req, res) {
         if (method === 'PUT') {
           const body = await parseBody(req);
           const now = new Date().toISOString();
-          db.prepare(`
+          await db.prepare(`
             UPDATE user_settings
             SET theme = COALESCE(?, theme),
                 language = COALESCE(?, language),
@@ -342,7 +356,7 @@ async function handleRequest(req, res) {
             user.id
           );
 
-          const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+          const settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
           return sendJSON(res, 200, { success: true, message: 'Settings saved successfully.', settings });
         }
       }
@@ -351,28 +365,29 @@ async function handleRequest(req, res) {
       // 2. DASHBOARD DATA AGGREGATION API
       // ----------------------------------------
       if (pathname === '/api/dashboard' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const todayStr = (parsedUrl.query.date || new Date().toISOString().split('T')[0]);
 
         // Tasks for today
-        const todayTasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date = ? ORDER BY start_time ASC').all(user.id, todayStr);
+        const todayTasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date = ? ORDER BY start_time ASC').all(user.id, todayStr);
         const completedTasks = todayTasks.filter(t => t.status === 'completed').length;
         const remainingTasks = todayTasks.length - completedTasks;
 
         // Upcoming events/tasks
-        const upcomingTasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? ORDER BY date ASC, start_time ASC LIMIT 5').all(user.id, todayStr);
+        const upcomingTasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? ORDER BY date ASC, start_time ASC LIMIT 5').all(user.id, todayStr);
 
         // Daily health check-in status
-        const todayHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+        const todayHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
 
         // Latest emotional status & past 7 days mood
-        const latestMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 1').get(user.id);
-        const pastWeekMoods = db.prepare('SELECT mood, emoji, checkin_date, stress_level FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const latestMood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 1').get(user.id);
+        const pastWeekMoods = await db.prepare('SELECT mood, emoji, checkin_date, stress_level FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
 
         // Health reminders count
-        const unreadNotifs = db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0').get(user.id).count;
+        const unreadNotifsRow = await db.prepare('SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0').get(user.id);
+        const unreadNotifs = unreadNotifsRow ? unreadNotifsRow.count : 0;
 
         return sendJSON(res, 200, {
           success: true,
@@ -406,7 +421,7 @@ async function handleRequest(req, res) {
 
       // GET /api/tasks (Filter by date, category, priority, search)
       if (pathname === '/api/tasks' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const { date, month, startDate, endDate, category, priority, search, status } = parsedUrl.query;
@@ -446,7 +461,7 @@ async function handleRequest(req, res) {
         }
 
         query += ' ORDER BY date ASC, start_time ASC';
-        const tasks = db.prepare(query).all(...params);
+        const tasks = await db.prepare(query).all(...params);
 
         // Check for schedule overlaps
         const overlaps = [];
@@ -466,7 +481,7 @@ async function handleRequest(req, res) {
 
       // POST /api/tasks
       if (pathname === '/api/tasks' && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
@@ -479,7 +494,7 @@ async function handleRequest(req, res) {
         // Detect overlapping schedule with existing tasks on same date
         let overlapWarning = null;
         if (start_time && end_time) {
-          const sameDayTasks = db.prepare('SELECT id, title, start_time, end_time FROM tasks WHERE user_id = ? AND date = ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(user.id, date);
+          const sameDayTasks = await db.prepare('SELECT id, title, start_time, end_time FROM tasks WHERE user_id = ? AND date = ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(user.id, date);
           for (const t of sameDayTasks) {
             if (start_time < t.end_time && end_time > t.start_time) {
               overlapWarning = `Schedule overlap detected with "${t.title}" (${t.start_time} - ${t.end_time})`;
@@ -491,7 +506,7 @@ async function handleRequest(req, res) {
         const taskId = 'task_' + crypto.randomUUID();
         const now = new Date().toISOString();
 
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, recurring, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
         `).run(
@@ -513,31 +528,31 @@ async function handleRequest(req, res) {
 
         // If reminder_time is provided, create a reminder notification
         if (reminder_time) {
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
             VALUES (?, ?, ?, ?, 'schedule', ?, 0, 1, ?)
           `).run('notif_' + crypto.randomUUID(), user.id, `Reminder: ${title.trim()}`, `Scheduled at ${start_time || date}. Don't forget!`, reminder_time, now);
         }
 
-        const created = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+        const created = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
         return sendJSON(res, 201, { success: true, message: 'Task created successfully.', task: created, overlapWarning });
       }
 
       // PUT /api/tasks/:id
       if (pathname.startsWith('/api/tasks/') && method === 'PUT') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const taskId = pathname.replace('/api/tasks/', '');
         const body = await parseBody(req);
         const now = new Date().toISOString();
 
-        const existing = db.prepare('SELECT id FROM tasks WHERE id = ? AND user_id = ?').get(taskId, user.id);
+        const existing = await db.prepare('SELECT id FROM tasks WHERE id = ? AND user_id = ?').get(taskId, user.id);
         if (!existing) {
           return sendJSON(res, 404, { success: false, message: 'Task not found or unauthorized.' });
         }
 
-        db.prepare(`
+        await db.prepare(`
           UPDATE tasks
           SET title = COALESCE(?, title),
               description = COALESCE(?, description),
@@ -563,17 +578,17 @@ async function handleRequest(req, res) {
           user.id
         );
 
-        const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+        const updated = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
         return sendJSON(res, 200, { success: true, message: 'Task updated successfully.', task: updated });
       }
 
       // DELETE /api/tasks/:id
       if (pathname.startsWith('/api/tasks/') && method === 'DELETE') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const taskId = pathname.replace('/api/tasks/', '');
-        const resDelete = db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(taskId, user.id);
+        const resDelete = await db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(taskId, user.id);
         if (resDelete.changes === 0) {
           return sendJSON(res, 404, { success: false, message: 'Task not found or unauthorized.' });
         }
@@ -587,17 +602,17 @@ async function handleRequest(req, res) {
 
       // GET /api/health
       if (pathname === '/api/health' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const limit = parseInt(parsedUrl.query.limit) || 30;
-        const records = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limit);
+        const records = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limit);
         return sendJSON(res, 200, { success: true, records });
       }
 
       // POST /api/health
       if (pathname === '/api/health' && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
@@ -641,13 +656,13 @@ async function handleRequest(req, res) {
         }
 
         const date = checkin_date || new Date().toISOString().split('T')[0];
-        const existing = db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
+        const existing = await db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
 
         let id = existing ? existing.id : ('hlth_' + crypto.randomUUID());
         const now = new Date().toISOString();
 
         if (existing) {
-          db.prepare(`
+          await db.prepare(`
             UPDATE health_checkins
             SET sleep_duration = ?, sleep_quality = ?, physical_condition = ?, energy_level = ?, exercise_status = ?, exercise_type = ?, exercise_duration = ?, meals_summary = ?, water_intake = ?, discomfort = ?, notes = ?
             WHERE id = ? AND user_id = ?
@@ -667,7 +682,7 @@ async function handleRequest(req, res) {
             user.id
           );
         } else {
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_intake, discomfort, notes, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
@@ -695,7 +710,7 @@ async function handleRequest(req, res) {
           adviceNotice = "Friendly Health Note: If you feel unwell or experience persistent pain or acute distress, remember that LifeCare does not replace medical advice. Please consult a qualified physician or professional healthcare provider.";
         }
 
-        const record = db.prepare('SELECT * FROM health_checkins WHERE id = ?').get(id);
+        const record = await db.prepare('SELECT * FROM health_checkins WHERE id = ?').get(id);
         return sendJSON(res, 200, { success: true, message: 'Daily physical check-in recorded!', record, adviceNotice });
       }
 
@@ -705,17 +720,17 @@ async function handleRequest(req, res) {
 
       // GET /api/mood
       if (pathname === '/api/mood' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const limit = parseInt(parsedUrl.query.limit) || 30;
-        const records = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limit);
+        const records = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limit);
         return sendJSON(res, 200, { success: true, records });
       }
 
       // POST /api/mood
       if (pathname === '/api/mood' && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
@@ -726,13 +741,13 @@ async function handleRequest(req, res) {
         }
 
         const date = checkin_date || new Date().toISOString().split('T')[0];
-        const existing = db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
+        const existing = await db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
 
         let id = existing ? existing.id : ('mood_' + crypto.randomUUID());
         const now = new Date().toISOString();
 
         if (existing) {
-          db.prepare(`
+          await db.prepare(`
             UPDATE mood_checkins
             SET mood = ?, emoji = ?, stress_level = ?, motivation_level = ?, connected_score = ?, relaxed_score = ?, anxiety_score = ?, emotional_notes = ?, journal_entry = ?
             WHERE id = ? AND user_id = ?
@@ -742,7 +757,7 @@ async function handleRequest(req, res) {
             emotional_notes || null, journal_entry || null, id, user.id
           );
         } else {
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes, journal_entry, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
@@ -760,7 +775,7 @@ async function handleRequest(req, res) {
         else if (mood === 'Relaxed') supportiveMessage = "Bình yên trong tâm trí là món quà quý giá nhất. Hãy tận hưởng khoảnh khắc này.";
         else if (mood === 'Anxious') supportiveMessage = "Hãy thả lỏng vai và cơ hàm. Hít thở sâu và cảm nhận đôi chân vững chãi trên mặt đất. Cảm giác này rồi sẽ qua đi an toàn.";
 
-        const record = db.prepare('SELECT * FROM mood_checkins WHERE id = ?').get(id);
+        const record = await db.prepare('SELECT * FROM mood_checkins WHERE id = ?').get(id);
         return sendJSON(res, 200, { success: true, message: 'Emotional reflection saved.', record, supportiveMessage });
       }
 
@@ -771,12 +786,12 @@ async function handleRequest(req, res) {
       // Feature #1: Daily Quick Check-in prompt & bundle submit
       // GET /api/checkin/status - checks what has been submitted today
       if (pathname === '/api/checkin/status' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const todayStr = new Date().toISOString().split('T')[0];
-        const health = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
-        const mood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+        const health = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+        const mood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
 
         return sendJSON(res, 200, {
           success: true,
@@ -791,7 +806,7 @@ async function handleRequest(req, res) {
 
       // POST /api/checkin/quick - single 30-60 second rapid checkin
       if (pathname === '/api/checkin/quick' && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
@@ -800,9 +815,9 @@ async function handleRequest(req, res) {
 
         // 1. Health part
         if (body.physical_condition || body.sleep_duration !== undefined || body.water_intake !== undefined) {
-          const existingHealth = db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+          const existingHealth = await db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
           if (existingHealth) {
-            db.prepare(`
+            await db.prepare(`
               UPDATE health_checkins
               SET physical_condition = COALESCE(?, physical_condition),
                   sleep_duration = COALESCE(?, sleep_duration),
@@ -811,7 +826,7 @@ async function handleRequest(req, res) {
               WHERE id = ?
             `).run(body.physical_condition || null, body.sleep_duration || null, body.water_intake || null, body.energy_level || null, existingHealth.id);
           } else {
-            db.prepare(`
+            await db.prepare(`
               INSERT INTO health_checkins (id, user_id, checkin_date, physical_condition, sleep_duration, water_intake, energy_level, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             `).run('hlth_' + crypto.randomUUID(), user.id, todayStr, body.physical_condition || 'Good', body.sleep_duration || 7, body.water_intake || 2, body.energy_level || 4, now);
@@ -820,15 +835,15 @@ async function handleRequest(req, res) {
 
         // 2. Mood part
         if (body.mood) {
-          const existingMood = db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
+          const existingMood = await db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
           if (existingMood) {
-            db.prepare(`
+            await db.prepare(`
               UPDATE mood_checkins
               SET mood = ?, emoji = COALESCE(?, emoji), stress_level = COALESCE(?, stress_level)
               WHERE id = ?
             `).run(body.mood, body.emoji || null, body.stress_level || null, existingMood.id);
           } else {
-            db.prepare(`
+            await db.prepare(`
               INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?)
             `).run('mood_' + crypto.randomUUID(), user.id, todayStr, body.mood, body.emoji || '🙂', body.stress_level || 2, now);
@@ -844,16 +859,16 @@ async function handleRequest(req, res) {
       // Feature #2: AI Wellness Assistant Chat
       // GET /api/ai/messages - retrieve chat history
       if (pathname === '/api/ai/messages' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const history = db.prepare('SELECT id, role, message, created_at FROM ai_chats WHERE user_id = ? ORDER BY created_at ASC LIMIT 50').all(user.id);
+        const history = await db.prepare('SELECT id, role, message, created_at FROM ai_chats WHERE user_id = ? ORDER BY created_at ASC LIMIT 50').all(user.id);
         return sendJSON(res, 200, { success: true, messages: history });
       }
 
       // POST /api/ai/chat - send prompt to assistant
       if (pathname === '/api/ai/chat' && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
@@ -867,19 +882,19 @@ async function handleRequest(req, res) {
 
         const now = new Date().toISOString();
         const userChatId = 'chat_' + crypto.randomUUID();
-        db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        await db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
           userChatId, user.id, 'user', userMessage, now
         );
 
         // Fetch user context for tailored wellness insights (strictly authorized data only)
-        const recentHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
-        const recentMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
-        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 30').all(user.id);
+        const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const recentMood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 30').all(user.id);
 
         const aiResult = await generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks, mode, language });
 
         const aiChatId = 'chat_' + crypto.randomUUID();
-        db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        await db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
           aiChatId, user.id, 'assistant', aiResult.reply, new Date().toISOString()
         );
 
@@ -894,7 +909,7 @@ async function handleRequest(req, res) {
       // Feature #3: Personal Health Timeline API
       // GET /api/timeline?range=7days|30days|year
       if (pathname === '/api/timeline' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const range = parsedUrl.query.range || '30days';
@@ -903,9 +918,9 @@ async function handleRequest(req, res) {
         if (range === 'year') limitDays = 365;
 
         // Fetch health & mood records merged into chronological date cards
-        const health = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limitDays);
-        const mood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limitDays);
-        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 200').all(user.id);
+        const health = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limitDays);
+        const mood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT ?').all(user.id, limitDays);
+        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 200').all(user.id);
 
         // Group by date
         const timelineMap = new Map();
@@ -939,10 +954,10 @@ async function handleRequest(req, res) {
 
       // Feature #4: Smart Schedule Recommendation API
       if (pathname === '/api/schedule/recommendations' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
+        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
         const recs = analyzeScheduleBalance(tasks);
 
         return sendJSON(res, 200, { success: true, ...recs });
@@ -950,12 +965,12 @@ async function handleRequest(req, res) {
 
       // Feature #5: Weekly Personal Report API
       if (pathname === '/api/reports/weekly' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
-        const recentHealth = db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
-        const recentMood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
+        const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+        const recentMood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
 
         const report = buildWeeklyReportData(tasks, recentHealth, recentMood);
 
@@ -972,7 +987,7 @@ async function handleRequest(req, res) {
       // 7. STATISTICS & CHARTS DATA APIS
       // ----------------------------------------
       if (pathname === '/api/statistics' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const days = parseInt(parsedUrl.query.days) || 7;
@@ -1005,9 +1020,9 @@ async function handleRequest(req, res) {
           moodParams.push(days);
         }
 
-        const tasks = db.prepare(taskQuery).all(...taskParams);
-        const health = db.prepare(healthQuery).all(...healthParams);
-        const mood = db.prepare(moodQuery).all(...moodParams);
+        const tasks = await db.prepare(taskQuery).all(...taskParams);
+        const health = await db.prepare(healthQuery).all(...healthParams);
+        const mood = await db.prepare(moodQuery).all(...moodParams);
 
         // Productivity by category
         const categoryCounts = {};
@@ -1041,11 +1056,11 @@ async function handleRequest(req, res) {
       // 8. NOTIFICATIONS & REMINDERS APIS
       // ----------------------------------------
       if (pathname === '/api/notifications') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         if (method === 'GET') {
-          const notifs = db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30').all(user.id);
+          const notifs = await db.prepare('SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30').all(user.id);
           return sendJSON(res, 200, { success: true, notifications: notifs });
         }
 
@@ -1055,7 +1070,7 @@ async function handleRequest(req, res) {
           if (!title || !message) return sendJSON(res, 400, { success: false, message: 'Title and message required.' });
 
           const id = 'notif_' + crypto.randomUUID();
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
             VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?)
           `).run(id, user.id, title, message, notification_type || 'schedule', notification_time || '12:00', new Date().toISOString());
@@ -1066,11 +1081,11 @@ async function handleRequest(req, res) {
 
       // Mark notification as read
       if (pathname.startsWith('/api/notifications/') && pathname.endsWith('/read') && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const notifId = pathname.split('/')[3];
-        db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?').run(notifId, user.id);
+        await db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?').run(notifId, user.id);
         return sendJSON(res, 200, { success: true });
       }
 
@@ -1078,13 +1093,13 @@ async function handleRequest(req, res) {
       // 9. DATA PRIVACY, EXPORT & CLEAR HISTORY APIS
       // ----------------------------------------
       if (pathname === '/api/user/export' && method === 'GET') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const tasks = db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
-        const health = db.prepare('SELECT * FROM health_checkins WHERE user_id = ?').all(user.id);
-        const mood = db.prepare('SELECT * FROM mood_checkins WHERE user_id = ?').all(user.id);
-        const settings = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
+        const health = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ?').all(user.id);
+        const mood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ?').all(user.id);
+        const settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
 
         const exportPayload = {
           lifecare_export_version: '1.0',
@@ -1112,21 +1127,21 @@ async function handleRequest(req, res) {
 
       // Clear health and mood history
       if (pathname === '/api/user/clear-health' && method === 'POST') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        db.prepare('DELETE FROM health_checkins WHERE user_id = ?').run(user.id);
-        db.prepare('DELETE FROM mood_checkins WHERE user_id = ?').run(user.id);
+        await db.prepare('DELETE FROM health_checkins WHERE user_id = ?').run(user.id);
+        await db.prepare('DELETE FROM mood_checkins WHERE user_id = ?').run(user.id);
 
         return sendJSON(res, 200, { success: true, message: 'Health and mood history permanently cleared.' });
       }
 
       // Delete account permanently
       if (pathname === '/api/user/account' && method === 'DELETE') {
-        const user = getAuthUser(req);
+        const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+        await db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
         return sendJSON(res, 200, { success: true, message: 'Your account and all associated data have been permanently removed.' });
       }
 

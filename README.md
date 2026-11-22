@@ -7,6 +7,8 @@
 ## 🌟 Key Capabilities & Architecture
 
 ### 1. User Authentication & Private Data Vault
+- **Chế độ mở (Guest Mode / No-login):** Tạm thời bỏ yêu cầu bắt buộc đăng nhập bằng email. Người dùng có thể trải nghiệm ngay lập tức toàn bộ tính năng của LifeCare (Lập kế hoạch, theo dõi sức khỏe thể chất, cảm xúc, trợ lý AI) dưới chế độ Khách mà không bị chặn bởi form đăng nhập.
+- **Tùy chọn đăng nhập / đăng ký:** Form đăng nhập email và mật khẩu vẫn hoạt động bình thường cho người dùng có nhu cầu lưu trữ tài khoản cá nhân riêng biệt.
 - **Multi-user Authentication:** Registration, login, session tokens, password recovery, profile editing (name, DOB, gender, wellness goals, avatar), and password management.
 - **Privacy & Isolation:** Strict database row-level user scoping (`WHERE user_id = ?`) ensuring no user can view or modify another person's schedules, check-ins, or reflections.
 - **Data Privacy & GDPR-friendly Controls:** Export all user data as JSON (`/api/user/export`), clear health and mood history, and permanent account deletion.
@@ -49,11 +51,28 @@
 
 ## 🚀 Getting Started
 
+### Database Configuration (Turso / Local SQLite)
+LifeCare hỗ trợ 2 chế độ cơ sở dữ liệu:
+1. **Turso Cloud Database (libSQL)** – Khuyên dùng cho môi trường production / Vercel Serverless:
+   - Thêm biến môi trường trên Vercel (Project Settings > Environment Variables):
+     - `TURSO_DATABASE_URL`: URL kết nối (ví dụ: `libsql://your-db.turso.io`)
+     - `TURSO_AUTH_TOKEN`: Token xác thực Turso
+   - Hệ thống cũng hỗ trợ tiền tố `TURBO_DATABASE_URL` và `TURBO_AUTH_TOKEN`.
+   - Khi có các biến này, ứng dụng sẽ tự động đồng bộ và lưu trữ dữ liệu vĩnh viễn trên Turso Cloud.
+2. **Local SQLite File:**
+   - Khi chạy ở môi trường local hoặc không cấu hình Turso, hệ thống tự động sử dụng file SQLite nội bộ (`data/lifecare.sqlite`).
+
 ### Prerequisites
-- Node.js (v18+ recommended; built-in SQLite supported on Node 22+)
+- Node.js (v18+ recommended)
 
 ### Run Locally
 ```bash
+# Cài đặt dependencies
+npm install
+
+# Khởi tạo database (tùy chọn)
+npm run db:setup
+
 # Start the server
 node server.js
 ```
