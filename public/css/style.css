@@ -1455,6 +1455,13 @@ button.month-day-cell { font: inherit; color: inherit; text-align: left; align-i
 .rw-body { position: relative; height: var(--rw-h); background: repeating-linear-gradient(135deg, var(--free-stripe) 0 6px, transparent 6px 12px); background-image: repeating-linear-gradient(135deg, var(--free-stripe) 0 6px, transparent 6px 12px), repeating-linear-gradient(to bottom, transparent 0 59px, var(--border-color) 59px 60px); }
 .rw-block { position: absolute; left: 2px; right: 2px; border-radius: 6px; overflow: hidden; font-size: 0.66rem; font-weight: 600; padding: 2px 4px; line-height: 1.2; }
 .rw-block span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Kéo thả khung giờ cố định và nhãn chú thích */
+.rw-block.movable { cursor: grab; touch-action: none; user-select: none; }
+.rw-block.movable:hover { box-shadow: inset 0 0 0 1px currentColor; }
+.rw-block.dragging { opacity: 0.3; }
+.legend-chip.chip-drag { cursor: grab; touch-action: none; user-select: none; }
+.legend-chip.chip-drag:hover { box-shadow: 0 0 0 1px currentColor; }
+.legend-chip.dragging { opacity: 0.45; }
 .rw-task { position: absolute; left: 42%; right: 3px; z-index: 2; border-radius: 6px; border: 0; background: var(--primary); color: #fff; font: inherit; font-size: 0.64rem; font-weight: 700; padding: 1px 4px; text-align: left; cursor: pointer; overflow: hidden; box-shadow: var(--shadow-sm); }
 .rw-task span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rw-task.done { opacity: 0.5; text-decoration: line-through; }
@@ -1608,10 +1615,19 @@ body.rw-dragging, body.rw-dragging * { cursor: grabbing !important; user-select:
 .delete-plans-actions { justify-content: space-between; margin-top: 12px; }
 .delete-plans-empty { padding: 20px; text-align: center; }
 .delete-plans-choice[hidden], .delete-plans-picker[hidden] { display: none !important; }
-/* Kéo mép dưới để đổi giờ kết thúc */
-.rw-task .rw-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; touch-action: none; }
-.rw-task .rw-resize::after { content: ''; position: absolute; left: 50%; bottom: 2px; width: 16px; height: 2px; margin-left: -8px; border-radius: 2px; background: rgba(255, 255, 255, 0.75); opacity: 0; transition: opacity 0.15s; }
-.rw-task:hover .rw-resize::after, .rw-task.resizing .rw-resize::after { opacity: 1; }
-.rw-task.resizing { z-index: 5; outline: 2px solid var(--primary); }
-@media (hover: none) { .rw-task .rw-resize { height: 12px; } .rw-task .rw-resize::after { opacity: 1; } }
+/* Kéo mép trên / dưới để đổi giờ bắt đầu / kết thúc (công việc và khung giờ cố định) */
+.rw-task .rw-resize, .rw-block .rw-resize { position: absolute; left: 0; right: 0; height: 7px; cursor: ns-resize; touch-action: none; z-index: 1; }
+.rw-resize-top { top: 0; }
+.rw-resize-bottom { bottom: 0; }
+.rw-task .rw-resize::after, .rw-block .rw-resize::after { content: ''; position: absolute; left: 50%; width: 16px; height: 2px; margin-left: -8px; border-radius: 2px; background: currentColor; opacity: 0; transition: opacity 0.15s; }
+.rw-task .rw-resize::after { background: rgba(255, 255, 255, 0.75); }
+.rw-resize-top::after { top: 2px; }
+.rw-resize-bottom::after { bottom: 2px; }
+.rw-task:hover .rw-resize::after, .rw-task.resizing .rw-resize::after,
+.rw-block.movable:hover .rw-resize::after, .rw-block.resizing .rw-resize::after { opacity: 0.8; }
+.rw-task.resizing, .rw-block.resizing { z-index: 5; outline: 2px solid var(--primary); }
+@media (hover: none) {
+  .rw-task .rw-resize, .rw-block .rw-resize { height: 12px; }
+  .rw-task .rw-resize::after, .rw-block .rw-resize::after { opacity: 0.8; }
+}
 body.rw-resizing, body.rw-resizing * { cursor: ns-resize !important; user-select: none; }

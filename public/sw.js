@@ -1,12 +1,12 @@
-const CACHE_NAME = 'lifecare-cache-v6';
+const CACHE_NAME = 'lifecare-cache-v10';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/css/style.css?v=20261127c',
-  '/js/i18n.js?v=20261127c',
-  '/js/i18n-auto.js?v=20261127c',
-  '/js/app.js?v=20261127c',
-  '/js/planning-ui.js?v=20261127c',
+  '/css/style.css?v=20261127g',
+  '/js/i18n.js?v=20261127g',
+  '/js/i18n-auto.js?v=20261127g',
+  '/js/app.js?v=20261127g',
+  '/js/planning-ui.js?v=20261127g',
   '/manifest.json',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'

@@ -312,9 +312,12 @@ async function loadRoutine() {
 }
 
 function renderBlockLegend() {
-  document.getElementById('blockLegend').innerHTML = Object.entries(BLOCK_META)
-    .map(([k, v]) => `<span class="legend-chip blk-${k}">${v.icon} ${v.label}</span>`).join('') +
-    `<span class="legend-chip free-chip">🟢 ${L('Trống (AI phân bổ)', 'Free (AI fills)')}</span><span class="legend-chip task-chip">✓ ${L('Công việc', 'Task')}</span>`;
+  const tip = L('Kéo xuống lưới để thêm', 'Drag onto the grid to add');
+  const box = document.getElementById('blockLegend');
+  box.innerHTML = Object.entries(BLOCK_META)
+    .map(([k, v]) => `<span class="legend-chip blk-${k} chip-drag" data-new-type="${k}" title="${tip}">${v.icon} ${v.label}</span>`).join('') +
+    `<span class="legend-chip free-chip">🟢 ${L('Trống (AI phân bổ)', 'Free (AI fills)')}</span><span class="legend-chip task-chip chip-drag" data-new-type="task" title="${tip}">✓ ${L('Công việc', 'Task')}</span>`;
+  box.querySelectorAll('[data-new-type]').forEach(c => c.addEventListener('pointerdown', e => startChipDrag(e, c)));
 }
 
 function renderRoutineGrid(grid, days) {
@@ -332,9 +335,9 @@ function renderRoutineGrid(grid, days) {
           <div class="rw-col ${d.date === today ? 'today' : ''}">
             <div class="rw-head">${DAY_SHORT[d.weekday]}<small>${fmtDM(d.date)}</small></div>
             <div class="rw-body" data-date="${d.date}">
-              ${d.blocks.map(b => `<div class="rw-block blk-${b.block_type}" style="${pos(b.start, b.end)}" title="${escapeHTML(b.label || '')} ${b.start}–${b.end}"><span>${BLOCK_META[b.block_type]?.icon || ''} ${escapeHTML(b.label || '')}</span></div>`).join('')}
+              ${d.blocks.map(b => `<div class="rw-block blk-${b.block_type} ${isMovableBlock(b) ? 'movable' : ''}" style="${pos(b.start, b.end)}" data-block-id="${escapeHTML(b.id || '')}" data-start="${b.start}" data-end="${b.end}" title="${escapeHTML(b.label || '')} ${b.start}–${b.end}${isMovableBlock(b) ? ' · ' + L('Kéo để đổi giờ, kéo mép trên/dưới để đổi giờ bắt đầu/kết thúc, bấm để sửa', 'Drag to move, drag the top/bottom edge to change the start/end time, click to edit') : ''}"><span>${BLOCK_META[b.block_type]?.icon || ''} ${escapeHTML(b.label || '')}</span>${isMovableBlock(b) && spanMin(b.start, b.end) >= 30 ? RESIZE_HANDLES : ''}</div>`).join('')}
               ${d.disruptions.map(x => `<div class="rw-disruption" style="${x.start_time ? pos(x.start_time, x.end_time) : `top:0;height:${H}px`}" title="${DISRUPTION_META[x.kind]?.label}"></div>`).join('')}
-              ${d.tasks.filter(t => t.start_time && t.end_time).map(t => `<button type="button" class="rw-task ${t.status === 'completed' ? 'done' : ''}" style="${pos(t.start_time, t.end_time)}" data-edit-task="${t.id}" title="${escapeHTML(t.title)} ${t.start_time}–${t.end_time} · ${L('Kéo để đổi ngày/giờ, kéo mép dưới để đổi giờ kết thúc', 'Drag to move, drag the bottom edge to change the end time')}"><span>${escapeHTML(t.title)}</span>${taskSpanMin(t) >= 30 ? '<i class="rw-resize" aria-hidden="true"></i>' : ''}</button>`).join('')}
+              ${d.tasks.filter(t => t.start_time && t.end_time).map(t => `<button type="button" class="rw-task ${t.status === 'completed' ? 'done' : ''}" style="${pos(t.start_time, t.end_time)}" data-edit-task="${t.id}" title="${escapeHTML(t.title)} ${t.start_time}–${t.end_time} · ${L('Kéo để đổi ngày/giờ, kéo mép trên/dưới để đổi giờ bắt đầu/kết thúc', 'Drag to move, drag the top/bottom edge to change the start/end time')}"><span>${escapeHTML(t.title)}</span>${taskSpanMin(t) >= 30 ? RESIZE_HANDLES : ''}</button>`).join('')}
               ${d.date === today ? `<div class="rw-now" style="top:${nowTop}px"></div>` : ''}
             </div>
           </div>`).join('')}
@@ -349,6 +352,14 @@ function renderRoutineGrid(grid, days) {
     });
     b.addEventListener('pointerdown', e => startRoutineDrag(e, b, grid, allTasks));
   });
+  grid.querySelectorAll('.rw-block.movable').forEach(b => {
+    b.addEventListener('click', () => {
+      if (Date.now() < routineDragClickGuard) return;
+      const blk = routineBlocks.find(x => x.id === b.dataset.blockId);
+      if (blk) openBlockModal(blk);
+    });
+    b.addEventListener('pointerdown', e => startBlockDrag(e, b, grid));
+  });
   // Giữ nguyên vị trí cuộn sau khi kéo thả; lần đầu cuộn tới khoảng 6h sáng
   const sc = grid.querySelector('.rw-scroll');
   if (sc) sc.scrollTop = routineKeepScroll != null ? routineKeepScroll : 6 * 60 * PX_PER_MIN - 10;
@@ -357,11 +368,15 @@ function renderRoutineGrid(grid, days) {
 
 // ---------------------------------------------------------------- kéo thả kế hoạch trong lưới tuần
 // Kéo một công việc sang cột ngày khác và/hoặc lên xuống để đổi giờ (bước 15 phút, giữ nguyên thời lượng).
-// Kéo mép dưới (.rw-resize) để kéo dài / rút ngắn: đổi giờ kết thúc, giữ ngày và giờ bắt đầu.
-// Dùng pointer events nên chạy được cả chuột lẫn màn hình cảm ứng. Khung giờ cố định không kéo được.
+// Kéo mép trên / mép dưới (.rw-resize-top / .rw-resize-bottom) để đổi giờ bắt đầu / kết thúc, giữ nguyên ngày.
+// Áp dụng cho cả công việc lẫn khung giờ cố định (trừ giấc ngủ qua đêm).
+// Dùng pointer events nên chạy được cả chuột lẫn màn hình cảm ứng.
 const DRAG_SNAP_MIN = 15;
-// Việc ngắn hơn 30 phút quá thấp để vừa kéo vừa có mép kéo, nên chỉ cho di chuyển.
-const taskSpanMin = t => (t.end_time === '24:00' ? 1440 : hmToMin(t.end_time)) - hmToMin(t.start_time);
+// Mục ngắn hơn 30 phút quá thấp để vừa kéo vừa có hai mép kéo, nên chỉ cho di chuyển.
+const spanMin = (s, e) => (e === '24:00' ? 1440 : hmToMin(e)) - hmToMin(s);
+const taskSpanMin = t => spanMin(t.start_time, t.end_time);
+const RESIZE_HANDLES = '<i class="rw-resize rw-resize-top" aria-hidden="true"></i><i class="rw-resize rw-resize-bottom" aria-hidden="true"></i>';
+const resizeModeOf = e => (e.target.closest('.rw-resize-top') ? 'resize-start' : e.target.closest('.rw-resize-bottom') ? 'resize-end' : 'move');
 let routineDrag = null;
 let routineDragClickGuard = 0;
 let routineKeepScroll = null;
@@ -375,24 +390,70 @@ function startRoutineDrag(e, el, grid, allTasks) {
   if (!(dur > 0)) dur = 60;
   const rect = el.getBoundingClientRect();
   routineDrag = {
-    el, task, grid, dur, active: false,
-    mode: e.target.closest('.rw-resize') ? 'resize' : 'move', start: s,
+    kind: 'task', el, task, grid, dur, active: false,
+    mode: resizeModeOf(e), start: s,
     fromDate: task.date || el.closest('.rw-body')?.dataset.date,
     x0: e.clientX, y0: e.clientY,
     offX: e.clientX - rect.left, offY: e.clientY - rect.top,
     w: rect.width, h: rect.height,
     ghost: null, preview: null, target: null
   };
+  listenRoutineDrag();
+}
+
+function listenRoutineDrag() {
   window.addEventListener('pointermove', onRoutineDragMove);
   window.addEventListener('pointerup', onRoutineDragEnd);
   window.addEventListener('pointercancel', cancelRoutineDrag);
   window.addEventListener('keydown', onRoutineDragKey);
 }
 
+// Khung giờ cố định kéo được nếu không qua đêm (giấc ngủ 22:30→06:00 bị cắt làm hai đoạn nên giữ nguyên).
+function isMovableBlock(b) {
+  const src = routineBlocks.find(x => x.id === b.id);
+  return !!src && src.end_time > src.start_time;
+}
+
+/** Kéo một khung giờ cố định: chỉ đổi khung giờ của thứ này (lặp lại mọi tuần), các thứ khác giữ nguyên. */
+function startBlockDrag(e, el, grid) {
+  if (e.button !== 0 || routineDrag) return;
+  const block = routineBlocks.find(b => b.id === el.dataset.blockId);
+  if (!block) return;
+  const s = hmToMin(el.dataset.start);
+  const rect = el.getBoundingClientRect();
+  routineDrag = {
+    kind: 'block', block, el, grid, mode: resizeModeOf(e), active: false,
+    dur: spanMin(el.dataset.start, el.dataset.end), start: s,
+    fromDate: el.closest('.rw-body')?.dataset.date,
+    x0: e.clientX, y0: e.clientY,
+    offX: e.clientX - rect.left, offY: e.clientY - rect.top,
+    w: rect.width, h: rect.height,
+    ghost: null, preview: null, target: null
+  };
+  listenRoutineDrag();
+}
+
+/** Kéo một nhãn ở hàng chú thích xuống lưới để thêm khung giờ (hoặc công việc) mới, mặc định 1 tiếng. */
+function startChipDrag(e, chip) {
+  if (e.button !== 0 || routineDrag) return;
+  const grid = document.getElementById('routineWeekGrid');
+  if (!grid.querySelector('.rw-body')) return;
+  const rect = chip.getBoundingClientRect();
+  routineDrag = {
+    kind: 'new', type: chip.dataset.newType, el: chip, grid, mode: 'move', active: false,
+    dur: 60, fromDate: null,
+    x0: e.clientX, y0: e.clientY,
+    offX: e.clientX - rect.left, offY: 0,
+    w: rect.width, h: rect.height,
+    ghost: null, preview: null, target: null
+  };
+  listenRoutineDrag();
+}
+
 function activateRoutineDrag() {
   const d = routineDrag;
   d.active = true;
-  if (d.mode === 'resize') {
+  if (d.mode !== 'move') {
     d.preview = document.createElement('div');
     d.preview.className = 'rw-drop-preview';
     d.el.classList.add('resizing');
@@ -401,6 +462,8 @@ function activateRoutineDrag() {
   }
   d.ghost = d.el.cloneNode(true);
   d.ghost.removeAttribute('data-edit-task');
+  d.ghost.removeAttribute('data-block-id');
+  d.ghost.removeAttribute('data-new-type');
   d.ghost.classList.add('rw-task-ghost');
   Object.assign(d.ghost.style, { width: `${d.w}px`, height: `${d.h}px`, top: '0', left: '0' });
   document.body.appendChild(d.ghost);
@@ -418,15 +481,20 @@ function onRoutineDragMove(e) {
     activateRoutineDrag();
   }
   e.preventDefault();
-  if (d.mode === 'resize') return resizeRoutineTask(d, e);
+  if (d.mode !== 'move') return resizeRoutineItem(d, e);
   d.ghost.style.transform = `translate(${e.clientX - d.offX}px, ${e.clientY - d.offY}px)`;
 
   // Tự cuộn lưới khi kéo gần mép trên/dưới
   const sc = d.grid.querySelector('.rw-scroll');
   if (sc) {
     const r = sc.getBoundingClientRect();
-    if (e.clientY < r.top + 48) sc.scrollTop -= 14;
-    else if (e.clientY > r.bottom - 32) sc.scrollTop += 14;
+    // Kéo nhãn từ hàng chú thích: chỉ bật tự cuộn sau khi con trỏ đã vào hẳn trong lưới,
+    // để lúc đi ngang qua mép trên lưới không bị trôi.
+    if (e.clientY >= r.top + 48 && e.clientY <= r.bottom - 32) d.scrollArmed = true;
+    if (d.kind !== 'new' || d.scrollArmed) {
+      if (e.clientY >= r.top && e.clientY < r.top + 48) sc.scrollTop -= 14;
+      else if (e.clientY <= r.bottom && e.clientY > r.bottom - 32) sc.scrollTop += 14;
+    }
   }
 
   // Cột ngày nằm dưới con trỏ (theo chiều ngang)
@@ -467,13 +535,19 @@ function endRoutineDragUI() {
 
 function cancelRoutineDrag() {
   const d = routineDrag;
-  // Huỷ khi đang kéo mép: trả lại chiều cao cũ
-  if (d && d.mode === 'resize' && d.active) d.el.style.height = `${Math.max(10, d.dur * PX_PER_MIN)}px`;
+  // Huỷ khi đang kéo mép: trả lại vị trí và chiều cao cũ
+  if (d && d.mode !== 'move' && d.active) {
+    d.el.style.top = `${d.start * PX_PER_MIN}px`;
+    d.el.style.height = `${Math.max(10, d.dur * PX_PER_MIN)}px`;
+  }
   endRoutineDragUI();
 }
 
-/** Kéo mép dưới: giờ kết thúc theo con trỏ, bước 15 phút, tối thiểu 15 phút, không quá 24:00. */
-function resizeRoutineTask(d, e) {
+/**
+ * Kéo mép: mép dưới đổi giờ kết thúc, mép trên đổi giờ bắt đầu; đầu còn lại đứng yên.
+ * Bước 15 phút, dài tối thiểu 15 phút, trong khoảng 00:00–24:00.
+ */
+function resizeRoutineItem(d, e) {
   const body = d.el.closest('.rw-body');
   if (!body) return;
   const sc = d.grid.querySelector('.rw-scroll');
@@ -483,12 +557,17 @@ function resizeRoutineTask(d, e) {
     else if (e.clientY < r.top + 48) sc.scrollTop -= 14;
   }
   const y = e.clientY - body.getBoundingClientRect().top;
-  let end = Math.round(y / PX_PER_MIN / DRAG_SNAP_MIN) * DRAG_SNAP_MIN;
-  end = Math.max(d.start + DRAG_SNAP_MIN, Math.min(1440, end));
-  d.el.style.height = `${Math.max(10, (end - d.start) * PX_PER_MIN)}px`;
-  d.target = { date: d.fromDate, start: d.task.start_time, end: end >= 1440 ? '24:00' : minToHM(end), minutes: end - d.start };
+  const snapped = Math.round(y / PX_PER_MIN / DRAG_SNAP_MIN) * DRAG_SNAP_MIN;
+  const origEnd = d.start + d.dur;
+  let start = d.start;
+  let end = origEnd;
+  if (d.mode === 'resize-end') end = Math.max(d.start + DRAG_SNAP_MIN, Math.min(1440, snapped));
+  else start = Math.max(0, Math.min(origEnd - DRAG_SNAP_MIN, snapped));
+  d.el.style.top = `${start * PX_PER_MIN}px`;
+  d.el.style.height = `${Math.max(10, (end - start) * PX_PER_MIN)}px`;
+  d.target = { date: d.fromDate, start: minToHM(start), end: end >= 1440 ? '24:00' : minToHM(end), minutes: end - start };
   if (d.preview.parentNode !== body) body.appendChild(d.preview);
-  Object.assign(d.preview.style, { top: `${d.start * PX_PER_MIN}px`, height: `${Math.max(10, (end - d.start) * PX_PER_MIN)}px` });
+  Object.assign(d.preview.style, { top: `${start * PX_PER_MIN}px`, height: `${Math.max(10, (end - start) * PX_PER_MIN)}px` });
   d.preview.textContent = `${d.target.start}–${d.target.end} · ${d.target.minutes}′`;
 }
 function onRoutineDragKey(e) { if (e.key === 'Escape') cancelRoutineDrag(); }
@@ -499,17 +578,19 @@ async function onRoutineDragEnd() {
   const { task, target, active } = d;
   endRoutineDragUI();
   if (!active || !target) return; // chỉ là một lần bấm -> để sự kiện click mở form sửa
+  if (d.kind === 'block') return dropRoutineBlock(d, target);
+  if (d.kind === 'new') return dropNewItem(d, target);
   if (target.date === d.fromDate && target.start === task.start_time && target.end === task.end_time) return;
   const sc0 = d.grid.querySelector('.rw-scroll');
 
-  if (d.mode === 'resize') {
+  if (d.mode !== 'move') {
     try {
       await apiRequest(`/api/tasks/${encodeURIComponent(task.id)}`, {
         method: 'PUT',
-        body: JSON.stringify({ end_time: target.end, duration_minutes: target.minutes })
+        body: JSON.stringify({ start_time: target.start, end_time: target.end, duration_minutes: target.minutes })
       });
       const cached = AppState.tasks.find(t => t.id === task.id);
-      if (cached) Object.assign(cached, { end_time: target.end, duration_minutes: target.minutes });
+      if (cached) Object.assign(cached, { start_time: target.start, end_time: target.end, duration_minutes: target.minutes });
       showToast(L(
         `Đã đổi "${task.title}" thành ${target.start}–${target.end} (${target.minutes} phút).`,
         `"${task.title}" is now ${target.start}–${target.end} (${target.minutes} min).`
@@ -539,6 +620,68 @@ async function onRoutineDragEnd() {
     showToast(L(
       `Đã chuyển "${task.title}" sang ${DAY_SHORT[dayKeyOf(target.date)]} ${fmtDM(target.date)}, ${target.start}–${target.end}.`,
       `Moved "${task.title}" to ${DAY_SHORT[dayKeyOf(target.date)]} ${fmtDM(target.date)}, ${target.start}–${target.end}.`
+    ), 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+  routineKeepScroll = sc ? sc.scrollTop : null;
+  loadRoutine();
+}
+
+// Khung giờ cố định lưu "HH:MM"; hết lúc 24:00 thì ghi là 00:00 (máy chủ hiểu là kết thúc lúc nửa đêm).
+const blockEnd = hm => (hm === '24:00' ? '00:00' : hm);
+
+/**
+ * Thả một khung giờ cố định: khung giờ chỉ có một thứ thì sửa thẳng; khung giờ lặp nhiều thứ thì
+ * tách thứ được kéo ra thành khung giờ riêng, các thứ còn lại giữ nguyên giờ cũ.
+ */
+async function dropRoutineBlock(d, target) {
+  const { block } = d;
+  const name = block.label || BLOCK_META[block.block_type]?.label || '';
+  const fromDay = dayKeyOf(d.fromDate);
+  const toDay = dayKeyOf(target.date);
+  if (fromDay === toDay && target.start === block.start_time && blockEnd(target.end) === block.end_time) return;
+  const sc = d.grid.querySelector('.rw-scroll');
+  const days = block.days.split(',');
+  const times = { start_time: target.start, end_time: blockEnd(target.end) };
+  try {
+    if (days.length === 1) {
+      await apiRequest(`/api/routine/${encodeURIComponent(block.id)}`, { method: 'PUT', body: JSON.stringify({ ...times, days: [toDay] }) });
+    } else {
+      await apiRequest(`/api/routine/${encodeURIComponent(block.id)}`, { method: 'PUT', body: JSON.stringify({ days: days.filter(x => x !== fromDay) }) });
+      await apiRequest('/api/routine', { method: 'POST', body: JSON.stringify({ block_type: block.block_type, label: block.label, ...times, days: [toDay] }) });
+    }
+    showToast(d.mode === 'move' ? L(
+      `Đã chuyển "${name}" sang ${DAY_SHORT[toDay]}, ${target.start}–${target.end} (lặp lại mỗi tuần).`,
+      `Moved "${name}" to ${DAY_SHORT[toDay]}, ${target.start}–${target.end} (repeats weekly).`
+    ) : L(
+      `Đã đổi "${name}" ${DAY_SHORT[toDay]} thành ${target.start}–${target.end} (${target.minutes} phút, lặp lại mỗi tuần).`,
+      `"${name}" on ${DAY_SHORT[toDay]} is now ${target.start}–${target.end} (${target.minutes} min, repeats weekly).`
+    ), 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+  routineKeepScroll = sc ? sc.scrollTop : null;
+  loadRoutine();
+}
+
+/** Thả một nhãn từ hàng chú thích: "Công việc" mở form thêm việc, các loại khác tạo khung giờ mới cho thứ đó. */
+async function dropNewItem(d, target) {
+  const sc = d.grid.querySelector('.rw-scroll');
+  if (d.type === 'task') {
+    openTaskModal(null, target.date, target.start, target.end === '24:00' ? '23:59' : target.end);
+    return;
+  }
+  const toDay = dayKeyOf(target.date);
+  const label = BLOCK_META[d.type]?.label || '';
+  try {
+    await apiRequest('/api/routine', {
+      method: 'POST',
+      body: JSON.stringify({ block_type: d.type, label, start_time: target.start, end_time: blockEnd(target.end), days: [toDay] })
+    });
+    showToast(L(
+      `Đã thêm "${label}" vào ${DAY_SHORT[toDay]}, ${target.start}–${target.end} (lặp lại mỗi tuần). Bấm vào để sửa.`,
+      `Added "${label}" on ${DAY_SHORT[toDay]}, ${target.start}–${target.end} (repeats weekly). Click it to edit.`
     ), 'success');
   } catch (err) {
     showToast(err.message, 'error');
