@@ -103,6 +103,10 @@ async function getAuthUser(req) {
 }
 
 // Múi giờ của người dùng: trình duyệt gửi header X-Timezone (VD Asia/Ho_Chi_Minh).
+function getRequestLang(req) {
+  return req.headers['x-language'] === 'en' ? 'en' : 'vi';
+}
+
 function getRequestTz(req) {
   return P.validTimezone(req.headers['x-timezone']) || P.DEFAULT_TZ;
 }
@@ -190,6 +194,7 @@ async function routeRequest(req, res) {
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
   const tz = getRequestTz(req);
+  const lang = getRequestLang(req);
 
   // Handle CORS Preflight
   if (method === 'OPTIONS') {
@@ -319,7 +324,7 @@ async function routeRequest(req, res) {
       // POST /api/auth/guest – tài khoản khách: dùng ngay, KHÔNG lưu dữ liệu (xem server/auth.js)
       if (pathname === '/api/auth/guest' && method === 'POST') {
         const body = await parseBody(req);
-        const guestId = await createGuestUser({ withSampleData: body.sample_data !== false });
+        const guestId = await createGuestUser({ withSampleData: body.sample_data !== false, lang });
         const { token } = await createSession(guestId);
         req._authUserId = guestId;
         const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at FROM users WHERE id = ?').get(guestId);
@@ -756,6 +761,32 @@ async function routeRequest(req, res) {
         return sendJSON(res, 200, { success: true, message: 'Task updated successfully.', task: updated });
       }
 
+      // POST /api/tasks/bulk-delete – xoá nhiều công việc một lần: { ids: [...] } hoặc { start, end } (cả tuần)
+      // Chỉ xoá công việc (kế hoạch); khung giờ cố định (routine_blocks) không bị đụng tới.
+      if (pathname === '/api/tasks/bulk-delete' && method === 'POST') {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        const body = await parseBody(req);
+        let ids;
+        if (Array.isArray(body.ids)) {
+          ids = [...new Set(body.ids.filter(x => typeof x === 'string' && x))].slice(0, 500);
+        } else if (P.isRealDate(body.start) && P.isRealDate(body.end) && body.start <= body.end) {
+          const rows = await db.prepare('SELECT id FROM tasks WHERE user_id = ? AND date >= ? AND date <= ?').all(user.id, body.start, body.end);
+          ids = rows.map(r => r.id);
+        } else {
+          return sendJSON(res, 400, { success: false, message: 'Cần danh sách ids hoặc khoảng ngày start/end hợp lệ.' });
+        }
+        let deleted = 0;
+        for (const id of ids) {
+          const r = await db.prepare('DELETE FROM tasks WHERE id = ? AND user_id = ?').run(id, user.id);
+          if (r.changes) {
+            deleted += r.changes;
+            await db.prepare("DELETE FROM progress_logs WHERE user_id = ? AND task_id = ? AND kind = 'task_done'").run(user.id, id);
+          }
+        }
+        return sendJSON(res, 200, { success: true, deleted });
+      }
+
       // DELETE /api/tasks/:id
       if (pathname.startsWith('/api/tasks/') && method === 'DELETE') {
         const user = await getAuthUser(req);
@@ -1150,7 +1181,7 @@ async function routeRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ?').all(user.id);
-        const recs = analyzeScheduleBalance(tasks);
+        const recs = analyzeScheduleBalance(tasks, lang);
 
         return sendJSON(res, 200, { success: true, ...recs });
       }
@@ -1164,7 +1195,7 @@ async function routeRequest(req, res) {
         const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
         const recentMood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
 
-        const report = buildWeeklyReportData(tasks, recentHealth, recentMood);
+        const report = buildWeeklyReportData(tasks, recentHealth, recentMood, lang);
 
         return sendJSON(res, 200, {
           success: true,
@@ -1494,7 +1525,7 @@ async function routeRequest(req, res) {
         };
 
         if (pathname === '/api/goals' && method === 'GET') {
-          const goals = await P.goalsWithProgress(db, user.id, tz);
+          const goals = await P.goalsWithProgress(db, user.id, tz, { lang });
           const logs = await db.prepare('SELECT * FROM progress_logs WHERE user_id = ? ORDER BY log_date DESC, created_at DESC LIMIT 40').all(user.id);
           return sendJSON(res, 200, { success: true, today: P.localNow(tz).date, goals, recentLogs: logs });
         }
@@ -1508,7 +1539,7 @@ async function routeRequest(req, res) {
             VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`)
             .run(id, user.id, g.title, g.description || '', g.deadline || null, g.estimated_minutes || null, g.priority || 'medium', now, now);
           const goal = await db.prepare('SELECT * FROM goals WHERE id = ?').get(id);
-          return sendJSON(res, 201, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz) } });
+          return sendJSON(res, 201, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz, lang) } });
         }
 
         // POST /api/goals/:id/progress – ghi lại việc học/làm thêm ngoài kế hoạch
@@ -1520,7 +1551,7 @@ async function routeRequest(req, res) {
           if (!minutes) return sendJSON(res, 400, { success: false, message: 'Số phút phải từ 1 đến 1440.' });
           const date = P.isRealDate(body.date) ? body.date : P.localNow(tz).date;
           await P.addProgressLog(db, user.id, { goal_id: goalId, minutes, note: String(body.note || '').slice(0, 300), log_date: date, kind: 'extra' });
-          return sendJSON(res, 200, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz) } });
+          return sendJSON(res, 200, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz, lang) } });
         }
 
         if (goalId && !parts[4] && method === 'PUT') {
@@ -1533,7 +1564,7 @@ async function routeRequest(req, res) {
             .run(...keys.map(k => g[k]), now, goalId, user.id);
           if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy mục tiêu.' });
           const goal = await db.prepare('SELECT * FROM goals WHERE id = ?').get(goalId);
-          return sendJSON(res, 200, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz) } });
+          return sendJSON(res, 200, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz, lang) } });
         }
 
         if (goalId && !parts[4] && method === 'DELETE') {

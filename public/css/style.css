@@ -1567,3 +1567,37 @@ button.month-day-cell { font: inherit; color: inherit; text-align: left; align-i
 @media (max-width: 1000px) {
   #aiChatDrawer.active ~ #reminderStack { right: 12px; left: 12px; width: auto; bottom: auto; top: 76px; }
 }
+
+/* ---------------------------------------------------------------- Xoá kế hoạch trong tuần */
+.title-with-action { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.btn-sm { padding: 6px 12px; font-size: 0.8rem; border-radius: var(--radius-sm); }
+.btn-danger-soft { background: rgba(239, 68, 68, 0.1); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.35); }
+.btn-danger-soft:hover { background: rgba(239, 68, 68, 0.18); }
+.btn-danger { background: #ef4444; color: #fff; }
+.btn-danger:hover { background: #dc2626; }
+.btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
+[data-theme="dark"] .btn-danger-soft { color: #fca5a5; }
+.delete-plans-choice { display: flex; flex-direction: column; gap: 10px; }
+.delete-choice {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  padding: 14px 16px; border-radius: var(--radius-md); cursor: pointer;
+  background: var(--bg-subtle); border: 1px solid var(--border-color); color: var(--text-main);
+  font: inherit; transition: border-color 0.15s, background 0.15s;
+}
+.delete-choice:hover { border-color: #ef4444; background: rgba(239, 68, 68, 0.06); }
+.delete-choice strong { display: block; color: var(--text-heading); }
+.delete-choice small { display: block; color: var(--text-muted); font-size: 0.8rem; margin-top: 2px; }
+.delete-choice-icon { font-size: 1.4rem; }
+.delete-plans-note { font-size: 0.8rem; margin-top: 4px; }
+.delete-plans-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.delete-plans-list { max-height: min(50vh, 420px); overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); }
+.delete-plan-day { padding: 6px 12px; font-size: 0.78rem; font-weight: 700; color: var(--text-muted); background: var(--bg-subtle); position: sticky; top: 0; }
+.delete-plan-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--border-color); cursor: pointer; }
+.delete-plan-item:hover { background: var(--bg-subtle); }
+.delete-plan-item input { flex-shrink: 0; width: 16px; height: 16px; }
+.delete-plan-item .dp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-heading); }
+.delete-plan-item .dp-meta { font-size: 0.76rem; color: var(--text-muted); white-space: nowrap; }
+.delete-plan-item.done .dp-title { text-decoration: line-through; opacity: 0.7; }
+.delete-plans-actions { justify-content: space-between; margin-top: 12px; }
+.delete-plans-empty { padding: 20px; text-align: center; }
+.delete-plans-choice[hidden], .delete-plans-picker[hidden] { display: none !important; }

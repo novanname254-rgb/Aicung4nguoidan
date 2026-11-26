@@ -10,25 +10,30 @@
  */
 
 const DAY_KEYS_UI = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const DAY_SHORT = { mon: 'T2', tue: 'T3', wed: 'T4', thu: 'T5', fri: 'T6', sat: 'T7', sun: 'CN' };
-const DAY_LONG = { mon: 'Thứ Hai', tue: 'Thứ Ba', wed: 'Thứ Tư', thu: 'Thứ Năm', fri: 'Thứ Sáu', sat: 'Thứ Bảy', sun: 'Chủ Nhật' };
+// Nhãn hai ngôn ngữ: { key: [tiếng Việt, English] } -> đọc ra theo ngôn ngữ đang chọn.
+const bilingual = table => new Proxy(table, {
+  get: (obj, key) => (Array.isArray(obj[key]) ? L(obj[key][0], obj[key][1]) : obj[key])
+});
+const DAY_SHORT = bilingual({ mon: ['T2', 'Mon'], tue: ['T3', 'Tue'], wed: ['T4', 'Wed'], thu: ['T5', 'Thu'], fri: ['T6', 'Fri'], sat: ['T7', 'Sat'], sun: ['CN', 'Sun'] });
+const DAY_LONG = bilingual({ mon: ['Thứ Hai', 'Monday'], tue: ['Thứ Ba', 'Tuesday'], wed: ['Thứ Tư', 'Wednesday'], thu: ['Thứ Năm', 'Thursday'], fri: ['Thứ Sáu', 'Friday'], sat: ['Thứ Bảy', 'Saturday'], sun: ['Chủ Nhật', 'Sunday'] });
+const metaEntry = (icon, vi, en) => ({ icon, get label() { return L(vi, en); } });
 const BLOCK_META = {
-  sleep: { icon: '😴', label: 'Ngủ nghỉ' },
-  meal: { icon: '🍽️', label: 'Ăn uống' },
-  school: { icon: '🏫', label: 'Đi học / đi làm' },
-  extra_class: { icon: '📘', label: 'Học thêm' },
-  leisure: { icon: '🎮', label: 'Giải trí' },
-  exercise: { icon: '🏃', label: 'Tập luyện' },
-  study: { icon: '📚', label: 'Tự học' }
+  sleep: metaEntry('😴', 'Ngủ nghỉ', 'Sleep'),
+  meal: metaEntry('🍽️', 'Ăn uống', 'Meals'),
+  school: metaEntry('🏫', 'Đi học / đi làm', 'School / work'),
+  extra_class: metaEntry('📘', 'Học thêm', 'Extra class'),
+  leisure: metaEntry('🎮', 'Giải trí', 'Leisure'),
+  exercise: metaEntry('🏃', 'Tập luyện', 'Exercise'),
+  study: metaEntry('📚', 'Tự học', 'Self-study')
 };
 const DISRUPTION_META = {
-  incident: { icon: '🚑', label: 'Sự cố' },
-  class_off: { icon: '🏖️', label: 'Nghỉ học' },
-  new_work: { icon: '📥', label: 'Việc phát sinh' },
-  unavailable: { icon: '⛔', label: 'Không thể thực hiện' }
+  incident: metaEntry('🚑', 'Sự cố', 'Incident'),
+  class_off: metaEntry('🏖️', 'Nghỉ học', 'Class cancelled'),
+  new_work: metaEntry('📥', 'Việc phát sinh', 'New work'),
+  unavailable: metaEntry('⛔', 'Không thể thực hiện', 'Unavailable')
 };
-const CATEGORY_VI = { Study: 'Học tập', Work: 'Công việc', Exercise: 'Thể thao', Personal: 'Cá nhân', Rest: 'Nghỉ ngơi', Other: 'Khác' };
-const PRIORITY_VI = { high: 'Cao', medium: 'Vừa', low: 'Thấp' };
+const CATEGORY_VI = bilingual({ Study: ['Học tập', 'Study'], Work: ['Công việc', 'Work'], Exercise: ['Thể thao', 'Exercise'], Personal: ['Cá nhân', 'Personal'], Rest: ['Nghỉ ngơi', 'Rest'], Other: ['Khác', 'Other'] });
+const PRIORITY_VI = bilingual({ high: ['Cao', 'High'], medium: ['Vừa', 'Medium'], low: ['Thấp', 'Low'] });
 
 // ---------------------------------------------------------------- tiện ích ngày giờ
 function addDaysStr(dateStr, n) {
@@ -67,9 +72,9 @@ function renderDayPicker(container, selected = DAY_KEYS_UI) {
       ${DAY_KEYS_UI.map(d => `<button type="button" class="day-toggle ${selected.includes(d) ? 'active' : ''}" data-day="${d}">${DAY_SHORT[d]}</button>`).join('')}
     </div>
     <div class="day-quick">
-      <button type="button" data-quick="all">Cả tuần</button>
-      <button type="button" data-quick="weekdays">T2–T6</button>
-      <button type="button" data-quick="weekend">T7–CN</button>
+      <button type="button" data-quick="all">${L('Cả tuần', 'All week')}</button>
+      <button type="button" data-quick="weekdays">${L('T2–T6', 'Mon–Fri')}</button>
+      <button type="button" data-quick="weekend">${L('T7–CN', 'Sat–Sun')}</button>
     </div>`;
   container.querySelectorAll('.day-toggle').forEach(b => b.addEventListener('click', () => b.classList.toggle('active')));
   container.querySelectorAll('[data-quick]').forEach(b => b.addEventListener('click', () => {
@@ -378,6 +383,106 @@ function renderBlockList() {
   }));
 }
 
+// ---------------------------------------------------------------- xoá kế hoạch trong tuần đang xem
+// "Kế hoạch" = công việc đã lập trong tuần (bảng tasks). Khung giờ cố định không bị xoá.
+let deletePlansTasks = [];
+
+async function openDeletePlansModal() {
+  const start = AppState.routineAnchor || mondayOf(todayLocal());
+  const end = addDaysStr(start, 6);
+  document.getElementById('deletePlansWeekLabel').textContent = L(`Tuần ${fmtDM(start)} – ${fmtDMY(end)}`, `Week ${fmtDM(start)} – ${fmtDMY(end)}`);
+  showDeletePlansStep('choice');
+  document.getElementById('deleteAllPlansHint').textContent = L('Đang tải...', 'Loading...');
+  openModal('deletePlansModal');
+  try {
+    const sch = await apiRequest(`/api/schedule?start=${start}&end=${end}`);
+    deletePlansTasks = sch.days.flatMap(d => d.tasks.map(t => ({ ...t, date: t.date || d.date })));
+  } catch (err) {
+    deletePlansTasks = [];
+    showToast(err.message, 'error');
+  }
+  const n = deletePlansTasks.length;
+  document.getElementById('deleteAllPlansHint').textContent = n
+    ? L(`Xóa ${n} kế hoạch đã lập trong tuần này.`, `Delete all ${n} plans made for this week.`)
+    : L('Tuần này chưa có kế hoạch nào.', 'There are no plans this week.');
+  document.getElementById('btnDeleteAllPlans').disabled = !n;
+  document.getElementById('btnDeleteSomePlans').disabled = !n;
+}
+
+function showDeletePlansStep(step) {
+  document.getElementById('deletePlansChoice').hidden = step !== 'choice';
+  document.getElementById('deletePlansPicker').hidden = step !== 'picker';
+}
+
+function renderDeletePlansList() {
+  const box = document.getElementById('deletePlansList');
+  const byDate = {};
+  for (const t of deletePlansTasks) (byDate[t.date] = byDate[t.date] || []).push(t);
+  const dates = Object.keys(byDate).sort();
+  box.innerHTML = dates.length ? dates.map(date => {
+    const dayName = DAY_LONG[dayKeyOf(date)];
+    const items = byDate[date].sort((a, b) => (a.start_time || '99').localeCompare(b.start_time || '99'));
+    return `<div class="delete-plan-day">${dayName} · ${fmtDM(date)}</div>` + items.map(t => `
+      <label class="delete-plan-item ${t.status === 'completed' ? 'done' : ''}">
+        <input type="checkbox" value="${escapeHTML(t.id)}" />
+        <span class="dp-title">${escapeHTML(t.title)}</span>
+        <span class="dp-meta">${t.start_time ? `${t.start_time}${t.end_time ? '–' + t.end_time : ''}` : L('Cả ngày', 'All day')}</span>
+      </label>`).join('');
+  }).join('') : `<p class="muted-text delete-plans-empty">${L('Tuần này chưa có kế hoạch nào.', 'There are no plans this week.')}</p>`;
+  box.querySelectorAll('input[type=checkbox]').forEach(c => c.addEventListener('change', updateDeletePlansCount));
+  document.getElementById('deletePlansSelectAll').checked = false;
+  updateDeletePlansCount();
+}
+
+function selectedDeletePlanIds() {
+  return [...document.querySelectorAll('#deletePlansList input[type=checkbox]:checked')].map(c => c.value);
+}
+
+function updateDeletePlansCount() {
+  const n = selectedDeletePlanIds().length;
+  const total = deletePlansTasks.length;
+  document.getElementById('deletePlansCount').textContent = L(`Đã chọn ${n}/${total}`, `${n}/${total} selected`);
+  document.getElementById('deletePlansSelectAll').checked = total > 0 && n === total;
+  const btn = document.getElementById('btnDeleteSelectedPlans');
+  btn.disabled = !n;
+  btn.textContent = n ? L(`Xóa ${n} mục đã chọn`, `Delete ${n} selected`) : L('Xóa mục đã chọn', 'Delete selected');
+}
+
+async function deletePlans(ids) {
+  if (!ids.length) return;
+  try {
+    const res = await apiRequest('/api/tasks/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    closeModal('deletePlansModal');
+    showToast(L(`Đã xóa ${res.deleted} kế hoạch.`, `Deleted ${res.deleted} plans.`), 'success');
+    loadRoutine();
+  } catch (err) { showToast(err.message, 'error'); }
+}
+
+function bindDeletePlansUI() {
+  document.getElementById('btnDeletePlans').addEventListener('click', openDeletePlansModal);
+  document.getElementById('btnDeleteAllPlans').addEventListener('click', () => {
+    const n = deletePlansTasks.length;
+    if (!n) return;
+    if (!confirm(L(`Xóa tất cả ${n} kế hoạch trong tuần này? Không thể hoàn tác.`, `Delete all ${n} plans this week? This cannot be undone.`))) return;
+    deletePlans(deletePlansTasks.map(t => t.id));
+  });
+  document.getElementById('btnDeleteSomePlans').addEventListener('click', () => {
+    renderDeletePlansList();
+    showDeletePlansStep('picker');
+  });
+  document.getElementById('btnDeletePlansBack').addEventListener('click', () => showDeletePlansStep('choice'));
+  document.getElementById('deletePlansSelectAll').addEventListener('change', e => {
+    document.querySelectorAll('#deletePlansList input[type=checkbox]').forEach(c => { c.checked = e.target.checked; });
+    updateDeletePlansCount();
+  });
+  document.getElementById('btnDeleteSelectedPlans').addEventListener('click', () => {
+    const ids = selectedDeletePlanIds();
+    if (!ids.length) return;
+    if (!confirm(L(`Xóa ${ids.length} kế hoạch đã chọn? Không thể hoàn tác.`, `Delete ${ids.length} selected plans? This cannot be undone.`))) return;
+    deletePlans(ids);
+  });
+}
+
 function openBlockModal(block = null) {
   document.getElementById('blockModalTitle').textContent = block ? L('Sửa khung giờ', 'Edit block') : L('Thêm khung giờ', 'Add block');
   document.getElementById('blockIdInput').value = block ? block.id : '';
@@ -515,11 +620,17 @@ async function loadGoals() {
     list.querySelectorAll('[data-goal-edit]').forEach(b => b.addEventListener('click', () => openGoalModal(goals.find(g => g.id === b.dataset.goalEdit))));
     list.querySelectorAll('[data-goal-ai]').forEach(b => b.addEventListener('click', () => {
       const g = goals.find(x => x.id === b.dataset.goalAi);
-      sendAiMessage(`Hãy chia nhỏ mục tiêu "${g.title}" (id: ${g.id}${g.deadline ? `, hạn ${g.deadline}` : ''}) thành các công việc cụ thể có thời lượng, mức ưu tiên và hạn, rồi xếp vào thời gian trống. Giữ lại các việc đã có.`, { intent: 'goal_breakdown' });
+      sendAiMessage(L(
+        `Hãy chia nhỏ mục tiêu "${g.title}" (id: ${g.id}${g.deadline ? `, hạn ${g.deadline}` : ''}) thành các công việc cụ thể có thời lượng, mức ưu tiên và hạn, rồi xếp vào thời gian trống. Giữ lại các việc đã có.`,
+        `Break the goal "${g.title}" (id: ${g.id}${g.deadline ? `, deadline ${g.deadline}` : ''}) into concrete tasks with duration, priority and deadline, then schedule them in free time. Keep existing tasks.`
+      ), { intent: 'goal_breakdown' });
     }));
     list.querySelectorAll('[data-goal-behind]').forEach(b => b.addEventListener('click', () => {
       const g = goals.find(x => x.id === b.dataset.goalBehind);
-      sendAiMessage(`Mình đang bị trễ tiến độ mục tiêu "${g.title}" (id: ${g.id}). Hãy điều chỉnh phần còn lại cho hợp lý mà không cần tạo lại toàn bộ lịch.`, { intent: 'behind_schedule' });
+      sendAiMessage(L(
+        `Mình đang bị trễ tiến độ mục tiêu "${g.title}" (id: ${g.id}). Hãy điều chỉnh phần còn lại cho hợp lý mà không cần tạo lại toàn bộ lịch.`,
+        `I'm behind on the goal "${g.title}" (id: ${g.id}). Please adjust the remaining work sensibly without rebuilding the whole schedule.`
+      ), { intent: 'behind_schedule' });
     }));
     list.querySelectorAll('[data-goal-del]').forEach(b => b.addEventListener('click', async () => {
       if (!confirm(L('Xoá mục tiêu này? Các công việc vẫn được giữ lại trong lịch.', 'Delete this goal? Its tasks stay in your planner.'))) return;
@@ -607,7 +718,10 @@ async function loadGoalAlerts() {
     document.getElementById('dashOpenGoals').addEventListener('click', () => navigateToView('goals'));
     box.querySelectorAll('[data-fix-goal]').forEach(b => b.addEventListener('click', () => {
       const g = active.find(x => x.id === b.dataset.fixGoal);
-      sendAiMessage(`Mục tiêu "${g.title}" (id: ${g.id}) đang có cảnh báo: ${g.progress.feasibility.message} Hãy giúp mình điều chỉnh cho khả thi.`, { intent: 'behind_schedule' });
+      sendAiMessage(L(
+        `Mục tiêu "${g.title}" (id: ${g.id}) đang có cảnh báo: ${g.progress.feasibility.message} Hãy giúp mình điều chỉnh cho khả thi.`,
+        `The goal "${g.title}" (id: ${g.id}) has a warning: ${g.progress.feasibility.message} Please help me make it feasible.`
+      ), { intent: 'behind_schedule' });
     }));
     notifyFeasibilityOncePerDay(alerts);
   } catch (e) {
@@ -856,17 +970,21 @@ function bindPlanningUI() {
       if (AppState.activeView === 'routine') loadRoutine();
       if (document.getElementById('disAiReplan').checked && (affected.length || body.kind === 'new_work')) {
         const when = allDay ? L('cả ngày', 'all day') : `${body.start_time}–${body.end_time}`;
-        sendAiMessage(
+        const affectedList = affected.map(t => `"${t.title}" (id ${t.id})`).join(', ');
+        sendAiMessage(L(
           `Mình vừa khai báo gián đoạn: ${DISRUPTION_META[body.kind].label} ngày ${fmtDMY(body.date)} (${when})${body.note ? '. ' + body.note : ''}. ` +
-          (affected.length ? `Các việc bị ảnh hưởng: ${affected.map(t => `"${t.title}" (id ${t.id})`).join(', ')}. ` : '') +
+          (affected.length ? `Các việc bị ảnh hưởng: ${affectedList}. ` : '') +
           'Hãy xếp lại giúp mình theo mức ưu tiên và hạn chót.',
-          { intent: 'disruption' }
-        );
+          `I just reported a disruption: ${DISRUPTION_META[body.kind].label} on ${fmtDMY(body.date)} (${when})${body.note ? '. ' + body.note : ''}. ` +
+          (affected.length ? `Affected tasks: ${affectedList}. ` : '') +
+          'Please re-plan them by priority and deadline.'
+        ), { intent: 'disruption' });
       }
     } catch (err) { showToast(err.message, 'error'); }
   });
 
   // Thời gian biểu
+  bindDeletePlansUI();
   renderDayPicker(document.getElementById('templateDayPicker'));
   document.getElementById('btnAddBlock').addEventListener('click', () => openBlockModal());
   document.getElementById('routinePrevWeek').addEventListener('click', () => { AppState.routineAnchor = addDaysStr(AppState.routineAnchor, -7); loadRoutine(); });
@@ -874,7 +992,10 @@ function bindPlanningUI() {
   document.getElementById('btnAiAllocate').addEventListener('click', () => {
     const start = AppState.routineAnchor || mondayOf(todayLocal());
     const from = start < todayLocal() ? todayLocal() : start;
-    sendAiMessage(`Hãy phân bổ thời gian trống từ ${fmtDMY(from)} đến ${fmtDMY(addDaysStr(start, 6))} theo mục tiêu và thói quen của mình. Đừng lấp kín mọi khoảng trống.`, { intent: 'allocate_free_time' });
+    sendAiMessage(L(
+      `Hãy phân bổ thời gian trống từ ${fmtDMY(from)} đến ${fmtDMY(addDaysStr(start, 6))} theo mục tiêu và thói quen của mình. Đừng lấp kín mọi khoảng trống.`,
+      `Please fill my free time from ${fmtDMY(from)} to ${fmtDMY(addDaysStr(start, 6))} based on my goals and habits. Don't fill every gap.`
+    ), { intent: 'allocate_free_time' });
   });
   document.getElementById('btnApplyTemplate').addEventListener('click', async () => {
     const days = pickedDays(document.getElementById('templateDayPicker'));
@@ -929,12 +1050,14 @@ function bindPlanningUI() {
       if (AppState.activeView === 'goals') loadGoals();
       if (!id && document.getElementById('goalAiBreakdown').checked) {
         const g = res.goal;
-        sendAiMessage(
+        sendAiMessage(L(
           `Mình vừa tạo mục tiêu "${g.title}" (id: ${g.id})${g.deadline ? `, hạn ${g.deadline}` : ''}${g.estimated_minutes ? `, ước tính ${Math.round(g.estimated_minutes / 60)} giờ` : ''}.` +
           `${g.description ? ' Chi tiết: ' + g.description + '.' : ''} Hãy chia nhỏ thành các công việc cụ thể (thời lượng, ưu tiên, hạn) và xếp vào thời gian trống.` +
           `${g.estimated_minutes ? '' : ' Ước lượng luôn tổng thời lượng và cập nhật cho mục tiêu.'}`,
-          { intent: 'goal_breakdown' }
-        );
+          `I just created the goal "${g.title}" (id: ${g.id})${g.deadline ? `, deadline ${g.deadline}` : ''}${g.estimated_minutes ? `, estimated ${Math.round(g.estimated_minutes / 60)} hours` : ''}.` +
+          `${g.description ? ' Details: ' + g.description + '.' : ''} Please break it into concrete tasks (duration, priority, deadline) and schedule them in free time.` +
+          `${g.estimated_minutes ? '' : ' Also estimate the total time and update the goal.'}`
+        ), { intent: 'goal_breakdown' });
       }
     } catch (err) { showToast(err.message, 'error'); }
   });

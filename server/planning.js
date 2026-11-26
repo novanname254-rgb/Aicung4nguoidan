@@ -43,7 +43,11 @@ function localNow(tz = DEFAULT_TZ) {
   return { date: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}`, weekday: parts.weekday, timezone: validTimezone(tz) || DEFAULT_TZ };
 }
 
-const isRealDate = s => typeof s === 'string' && DATE_RE.test(s) && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
+const isRealDate = s => {
+  if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z'); // tháng 13 / ngày 32 cho Invalid Date, toISOString() sẽ ném lỗi
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+};
 const isTime = s => typeof s === 'string' && TIME_RE.test(s);
 const toMin = hm => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 const toHM = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -153,7 +157,8 @@ async function addProgressLog(db, userId, { goal_id = null, task_id = null, minu
 }
 
 /** % hoàn thành, cột mốc, dự báo và mức khả thi của một mục tiêu. */
-async function goalProgress(db, userId, goal, tz) {
+async function goalProgress(db, userId, goal, tz, lang = 'vi') {
+  const T = (vi, en) => (lang === 'en' ? en : vi);
   const today = localNow(tz).date;
   const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND goal_id = ?').all(userId, goal.id);
   const logs = await db.prepare('SELECT log_date, minutes, kind FROM progress_logs WHERE user_id = ? AND goal_id = ? ORDER BY log_date ASC').all(userId, goal.id);
@@ -206,18 +211,18 @@ async function goalProgress(db, userId, goal, tz) {
   let feasibility = { level: 'ok', message: null, free_minutes_until_deadline: null };
   if (goal.status !== 'done' && remaining > 0 && goal.deadline) {
     if (goal.deadline < today) {
-      feasibility = { level: 'overdue', message: `Đã quá hạn ${goal.deadline}, còn khoảng ${Math.round(remaining / 60 * 10) / 10} giờ chưa xong.`, free_minutes_until_deadline: 0 };
+      feasibility = { level: 'overdue', message: T(`Đã quá hạn ${goal.deadline}, còn khoảng ${Math.round(remaining / 60 * 10) / 10} giờ chưa xong.`, `Past the deadline ${goal.deadline}, about ${Math.round(remaining / 60 * 10) / 10} hours still unfinished.`), free_minutes_until_deadline: 0 };
     } else {
       const free = await findFreeSlots(db, userId, today, goal.deadline, { minMinutes: 30, tz });
       const freeMinutes = free.reduce((s, f) => s + f.minutes, 0);
       const usable = Math.round(freeMinutes * 0.5); // không nên lấp kín mọi khoảng trống
       const unscheduled = Math.max(0, remaining - scheduledMinutes);
       if (unscheduled > usable) {
-        feasibility = { level: 'infeasible', message: `Còn ${Math.round(remaining / 6) / 10} giờ việc nhưng chỉ có khoảng ${Math.round(usable / 6) / 10} giờ trống hợp lý trước hạn. Nên lùi hạn, giảm khối lượng hoặc bỏ bớt việc khác.`, free_minutes_until_deadline: freeMinutes };
+        feasibility = { level: 'infeasible', message: T(`Còn ${Math.round(remaining / 6) / 10} giờ việc nhưng chỉ có khoảng ${Math.round(usable / 6) / 10} giờ trống hợp lý trước hạn. Nên lùi hạn, giảm khối lượng hoặc bỏ bớt việc khác.`, `${Math.round(remaining / 6) / 10} hours of work left but only about ${Math.round(usable / 6) / 10} reasonable free hours before the deadline. Consider moving the deadline, reducing the scope or dropping other tasks.`), free_minutes_until_deadline: freeMinutes };
       } else if (unscheduled > 0) {
-        feasibility = { level: 'needs_scheduling', message: `Còn khoảng ${Math.round(unscheduled / 6) / 10} giờ chưa được xếp vào lịch trước hạn.`, free_minutes_until_deadline: freeMinutes };
+        feasibility = { level: 'needs_scheduling', message: T(`Còn khoảng ${Math.round(unscheduled / 6) / 10} giờ chưa được xếp vào lịch trước hạn.`, `About ${Math.round(unscheduled / 6) / 10} hours are not yet scheduled before the deadline.`), free_minutes_until_deadline: freeMinutes };
       } else if (daysVsDeadline !== null && daysVsDeadline < 0 && basis === 'pace') {
-        feasibility = { level: 'behind', message: `Theo nhịp hiện tại sẽ xong trễ khoảng ${-daysVsDeadline} ngày so với hạn.`, free_minutes_until_deadline: freeMinutes };
+        feasibility = { level: 'behind', message: T(`Theo nhịp hiện tại sẽ xong trễ khoảng ${-daysVsDeadline} ngày so với hạn.`, `At the current pace you will finish about ${-daysVsDeadline} days after the deadline.`), free_minutes_until_deadline: freeMinutes };
       } else {
         feasibility.free_minutes_until_deadline = freeMinutes;
       }
@@ -240,10 +245,10 @@ async function goalProgress(db, userId, goal, tz) {
   };
 }
 
-async function goalsWithProgress(db, userId, tz, { includeDone = true } = {}) {
+async function goalsWithProgress(db, userId, tz, { includeDone = true, lang = 'vi' } = {}) {
   const goals = await db.prepare(`SELECT * FROM goals WHERE user_id = ? ${includeDone ? '' : "AND status != 'done'"} ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, deadline ASC`).all(userId);
   const out = [];
-  for (const g of goals) out.push({ ...g, progress: await goalProgress(db, userId, g, tz) });
+  for (const g of goals) out.push({ ...g, progress: await goalProgress(db, userId, g, tz, lang) });
   return out;
 }
 

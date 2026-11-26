@@ -1,9 +1,10 @@
-const CACHE_NAME = 'lifecare-cache-v2';
+const CACHE_NAME = 'lifecare-cache-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/css/style.css',
   '/js/i18n.js',
+  '/js/i18n-auto.js',
   '/js/app.js',
   '/js/planning-ui.js',
   '/manifest.json',

@@ -72,8 +72,9 @@ async function getDefaultUser() {
   };
 }
 
-async function seedInitialDemoData(userId) {
+async function seedInitialDemoData(userId, lang = 'vi') {
   const db = getDb();
+  const S = (vi, en) => (lang === 'en' ? en : vi); // nội dung mẫu theo ngôn ngữ đang chọn
   // Mã bản ghi mẫu: tài khoản demo giữ mã cũ, tài khoản khách thêm hậu tố riêng để không trùng.
   const sid = base => (userId === DEFAULT_USER_ID ? base : `${base}_${userId.slice(-12)}`);
   const GOAL_ID = sid('goal_demo_1');
@@ -85,8 +86,8 @@ async function seedInitialDemoData(userId) {
   const tasks = [
     {
       id: sid('task_demo_1'),
-      title: 'Morning Yoga & Breathing Meditation',
-      description: 'Gentle 20-min vinyasa stretch and 4-7-8 deep breathing routine',
+      title: S('Yoga buổi sáng & thiền thở', 'Morning Yoga & Breathing Meditation'),
+      description: S('Giãn cơ nhẹ 20 phút và bài thở 4-7-8', 'Gentle 20-min vinyasa stretch and 4-7-8 deep breathing routine'),
       category: 'Exercise',
       priority: 'medium',
       date: getDateStr(0),
@@ -96,8 +97,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_2'),
-      title: 'Review System Architecture Paper',
-      description: 'Analyze distributed database trade-offs and draft summary notes',
+      title: S('Đọc bài báo về kiến trúc hệ thống', 'Review System Architecture Paper'),
+      description: S('Phân tích đánh đổi của cơ sở dữ liệu phân tán và ghi tóm tắt', 'Analyze distributed database trade-offs and draft summary notes'),
       category: 'Study',
       priority: 'high',
       date: getDateStr(0),
@@ -107,8 +108,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_3'),
-      title: 'Mindful Lunch & Hydration Break',
-      description: 'Eat away from screens and drink a large glass of water',
+      title: S('Ăn trưa chánh niệm & uống nước', 'Mindful Lunch & Hydration Break'),
+      description: S('Ăn xa màn hình và uống một cốc nước lớn', 'Eat away from screens and drink a large glass of water'),
       category: 'Rest',
       priority: 'medium',
       date: getDateStr(0),
@@ -118,8 +119,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_4'),
-      title: 'Team Product Sync & Standup',
-      description: 'Align on sprint deliverables and unblock dependencies',
+      title: S('Họp nhóm dự án', 'Team Product Sync & Standup'),
+      description: S('Thống nhất việc cần giao trong tuần và gỡ vướng mắc', 'Align on sprint deliverables and unblock dependencies'),
       category: 'Work',
       priority: 'high',
       date: getDateStr(0),
@@ -129,8 +130,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_5'),
-      title: 'Evening Walk in Community Park',
-      description: 'Unwind without phone, get fresh air and sunshine',
+      title: S('Đi dạo buổi tối ở công viên', 'Evening Walk in Community Park'),
+      description: S('Thư giãn không điện thoại, hít thở không khí trong lành', 'Unwind without phone, get fresh air and sunshine'),
       category: 'Personal',
       priority: 'low',
       date: getDateStr(0),
@@ -140,8 +141,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_6'),
-      title: 'Reflect & Journal in LifeCare',
-      description: 'Write down 3 things I am grateful for and log mood',
+      title: S('Viết nhật ký trên LifeCare', 'Reflect & Journal in LifeCare'),
+      description: S('Ghi 3 điều biết ơn và ghi lại tâm trạng', 'Write down 3 things I am grateful for and log mood'),
       category: 'Rest',
       priority: 'low',
       date: getDateStr(0),
@@ -151,8 +152,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_7'),
-      title: 'Submit Bi-weekly Lab Report',
-      description: 'Finalize references and submit PDF to portal',
+      title: S('Nộp báo cáo thí nghiệm', 'Submit Bi-weekly Lab Report'),
+      description: S('Hoàn thiện tài liệu tham khảo và nộp PDF', 'Finalize references and submit PDF to portal'),
       category: 'Study',
       priority: 'high',
       date: getDateStr(1),
@@ -162,8 +163,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_8'),
-      title: '30-minute Cardio Cycling',
-      description: 'Indoor trainer session maintaining zone 2 cardio',
+      title: S('Đạp xe 30 phút', '30-minute Cardio Cycling'),
+      description: S('Tập trong nhà, giữ nhịp tim vùng 2', 'Indoor trainer session maintaining zone 2 cardio'),
       category: 'Exercise',
       priority: 'medium',
       date: getDateStr(1),
@@ -173,8 +174,8 @@ async function seedInitialDemoData(userId) {
     },
     {
       id: sid('task_demo_9'),
-      title: 'Grocery Restock: Fresh Greens & Fruits',
-      description: 'Buy berries, spinach, almonds and oat milk',
+      title: S('Đi chợ: rau xanh & trái cây', 'Grocery Restock: Fresh Greens & Fruits'),
+      description: S('Mua dâu, rau chân vịt, hạnh nhân và sữa yến mạch', 'Buy berries, spinach, almonds and oat milk'),
       category: 'Personal',
       priority: 'medium',
       date: getDateStr(2),
@@ -195,13 +196,13 @@ async function seedInitialDemoData(userId) {
 
   // Seed 7 days of Health Check-ins
   const healthData = [
-    { days: 0, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2200, disc: '', notes: 'Felt well rested, morning yoga felt invigorating.' },
-    { days: 1, sleep: 7.0, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2400, disc: '', notes: 'Good energy throughout the afternoon.' },
-    { days: 2, sleep: 6.5, qual: 'Average', cond: 'Normal', energy: 3, ex: 'No', water_ml: 1800, disc: 'Slight lower back stiffness from sitting', notes: 'Need to stand up more frequently.' },
-    { days: 3, sleep: 8.0, qual: 'Very Good', cond: 'Very Good', energy: 5, ex: 'Yes', water_ml: 2500, disc: '', notes: 'Super energized today after solid 8h sleep!' },
-    { days: 4, sleep: 7.0, qual: 'Good', cond: 'Normal', energy: 4, ex: 'Yes', water_ml: 2100, disc: '', notes: 'Steady pace, hydrated regularly.' },
-    { days: 5, sleep: 6.0, qual: 'Poor', cond: 'Tired', energy: 2, ex: 'No', water_ml: 1500, disc: 'Mild headache in evening', notes: 'Stayed up reading late, felt sluggish.' },
-    { days: 6, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2000, disc: '', notes: 'Recovered well, took a brisk outdoor walk.' }
+    { days: 0, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2200, disc: '', notes: S('Ngủ đủ giấc, yoga buổi sáng rất sảng khoái.', 'Felt well rested, morning yoga felt invigorating.') },
+    { days: 1, sleep: 7.0, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2400, disc: '', notes: S('Năng lượng tốt suốt buổi chiều.', 'Good energy throughout the afternoon.') },
+    { days: 2, sleep: 6.5, qual: 'Average', cond: 'Normal', energy: 3, ex: 'No', water_ml: 1800, disc: S('Hơi cứng lưng dưới vì ngồi lâu', 'Slight lower back stiffness from sitting'), notes: S('Cần đứng dậy vận động thường xuyên hơn.', 'Need to stand up more frequently.') },
+    { days: 3, sleep: 8.0, qual: 'Very Good', cond: 'Very Good', energy: 5, ex: 'Yes', water_ml: 2500, disc: '', notes: S('Rất nhiều năng lượng sau 8 tiếng ngủ ngon!', 'Super energized today after solid 8h sleep!') },
+    { days: 4, sleep: 7.0, qual: 'Good', cond: 'Normal', energy: 4, ex: 'Yes', water_ml: 2100, disc: '', notes: S('Nhịp độ đều, uống nước đầy đủ.', 'Steady pace, hydrated regularly.') },
+    { days: 5, sleep: 6.0, qual: 'Poor', cond: 'Tired', energy: 2, ex: 'No', water_ml: 1500, disc: S('Đau đầu nhẹ buổi tối', 'Mild headache in evening'), notes: S('Thức khuya đọc sách, thấy uể oải.', 'Stayed up reading late, felt sluggish.') },
+    { days: 6, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2000, disc: '', notes: S('Hồi phục tốt, đi bộ nhanh ngoài trời.', 'Recovered well, took a brisk outdoor walk.') }
   ];
 
   for (const h of healthData) {
@@ -227,13 +228,13 @@ async function seedInitialDemoData(userId) {
 
   // Seed 7 days of Mood Check-ins
   const moodData = [
-    { days: 0, mood: 'Relaxed', emoji: '😌', stress: 2, mot: 4, conn: 4, rel: 4, anx: 1, notes: 'Feeling centered and balanced. Clear plan for today.' },
-    { days: 1, mood: 'Happy', emoji: '😊', stress: 2, mot: 5, conn: 5, rel: 3, anx: 1, notes: 'Had great talk with friends and finished project milestone.' },
-    { days: 2, mood: 'Tired', emoji: '🥱', stress: 3, mot: 3, conn: 3, rel: 2, anx: 2, notes: 'A bit drained from back-to-back meetings. Need early bedtime.' },
-    { days: 3, mood: 'Excited', emoji: '✨', stress: 1, mot: 5, conn: 4, rel: 4, anx: 1, notes: 'Received positive feedback on research proposal.' },
-    { days: 4, mood: 'Normal', emoji: '🙂', stress: 2, mot: 4, conn: 3, rel: 3, anx: 2, notes: 'Standard productive day, kept calm.' },
-    { days: 5, mood: 'Stressed', emoji: '😣', stress: 4, mot: 2, conn: 2, rel: 1, anx: 3, notes: 'Felt a bit behind on deadlines, reminded myself to breathe.' },
-    { days: 6, mood: 'Relaxed', emoji: '🌿', stress: 2, mot: 4, conn: 4, rel: 4, anx: 1, notes: 'Spent quality time outdoors in nature.' }
+    { days: 0, mood: 'Relaxed', emoji: '😌', stress: 2, mot: 4, conn: 4, rel: 4, anx: 1, notes: S('Thấy cân bằng và vững vàng. Kế hoạch hôm nay rõ ràng.', 'Feeling centered and balanced. Clear plan for today.') },
+    { days: 1, mood: 'Happy', emoji: '😊', stress: 2, mot: 5, conn: 5, rel: 3, anx: 1, notes: S('Nói chuyện vui với bạn bè và xong một cột mốc dự án.', 'Had great talk with friends and finished project milestone.') },
+    { days: 2, mood: 'Tired', emoji: '🥱', stress: 3, mot: 3, conn: 3, rel: 2, anx: 2, notes: S('Hơi kiệt sức vì họp liên tục. Cần đi ngủ sớm.', 'A bit drained from back-to-back meetings. Need early bedtime.') },
+    { days: 3, mood: 'Excited', emoji: '✨', stress: 1, mot: 5, conn: 4, rel: 4, anx: 1, notes: S('Nhận được góp ý tích cực về đề cương nghiên cứu.', 'Received positive feedback on research proposal.') },
+    { days: 4, mood: 'Normal', emoji: '🙂', stress: 2, mot: 4, conn: 3, rel: 3, anx: 2, notes: S('Một ngày làm việc bình thường, giữ được bình tĩnh.', 'Standard productive day, kept calm.') },
+    { days: 5, mood: 'Stressed', emoji: '😣', stress: 4, mot: 2, conn: 2, rel: 1, anx: 3, notes: S('Thấy hơi trễ hạn, tự nhắc mình hít thở sâu.', 'Felt a bit behind on deadlines, reminded myself to breathe.') },
+    { days: 6, mood: 'Relaxed', emoji: '🌿', stress: 2, mot: 4, conn: 4, rel: 4, anx: 1, notes: S('Dành thời gian chất lượng ngoài thiên nhiên.', 'Spent quality time outdoors in nature.') }
   ];
 
   for (const m of moodData) {
@@ -266,12 +267,12 @@ async function seedInitialDemoData(userId) {
     }
     await db.prepare(`INSERT OR IGNORE INTO goals (id, user_id, title, description, deadline, estimated_minutes, priority, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'high', 'active', ?, ?)`)
-      .run(GOAL_ID, userId, 'Hoàn thành báo cáo nghiên cứu', 'Báo cáo 20 trang về kiến trúc cơ sở dữ liệu phân tán', getDateStr(-12), 900, getDateStr(5) + 'T08:00:00.000Z', now);
+      .run(GOAL_ID, userId, S('Hoàn thành báo cáo nghiên cứu', 'Finish the research report'), S('Báo cáo 20 trang về kiến trúc cơ sở dữ liệu phân tán', '20-page report on distributed database architecture'), getDateStr(-12), 900, getDateStr(5) + 'T08:00:00.000Z', now);
     const goalTasks = [
-      [sid('task_goal_1'), 'Đọc và tóm tắt 3 bài báo chính', getDateStr(3), '20:00', '21:30', 90, 'completed'],
-      [sid('task_goal_2'), 'Lập dàn ý báo cáo', getDateStr(1), '20:00', '21:00', 60, 'completed'],
-      [sid('task_goal_3'), 'Viết phần 1: Tổng quan', getDateStr(-1), '20:00', '21:30', 90, 'pending'],
-      [sid('task_goal_4'), 'Viết phần 2: So sánh kiến trúc', getDateStr(-3), '19:45', '21:15', 90, 'pending']
+      [sid('task_goal_1'), S('Đọc và tóm tắt 3 bài báo chính', 'Read and summarize 3 key papers'), getDateStr(3), '20:00', '21:30', 90, 'completed'],
+      [sid('task_goal_2'), S('Lập dàn ý báo cáo', 'Outline the report'), getDateStr(1), '20:00', '21:00', 60, 'completed'],
+      [sid('task_goal_3'), S('Viết phần 1: Tổng quan', 'Write part 1: Overview'), getDateStr(-1), '20:00', '21:30', 90, 'pending'],
+      [sid('task_goal_4'), S('Viết phần 2: So sánh kiến trúc', 'Write part 2: Architecture comparison'), getDateStr(-3), '19:45', '21:15', 90, 'pending']
     ];
     for (const [id, title, date, start, end, dur, status] of goalTasks) {
       await db.prepare(`INSERT OR IGNORE INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, goal_id, duration_minutes, deadline, created_at, updated_at)
@@ -283,7 +284,7 @@ async function seedInitialDemoData(userId) {
       }
     }
     await db.prepare(`INSERT OR IGNORE INTO progress_logs (id, user_id, goal_id, task_id, log_date, minutes, kind, note, created_at)
-      VALUES (?, ?, ?, NULL, ?, 45, 'extra', 'Đọc thêm tài liệu ngoài kế hoạch', ?)`).run(sid('log_demo_extra'), userId, GOAL_ID, getDateStr(2), now);
+      VALUES (?, ?, ?, NULL, ?, 45, 'extra', ?, ?)`).run(sid('log_demo_extra'), userId, GOAL_ID, getDateStr(2), S('Đọc thêm tài liệu ngoài kế hoạch', 'Extra reading outside the plan'), now);
   } catch (e) {
     console.warn('[LifeCare Seed] Planning demo data:', e.message);
   }
@@ -296,8 +297,8 @@ async function seedInitialDemoData(userId) {
     `).run(
       sid('notif_demo_1'),
       userId,
-      'Daily Hydration Check 💧',
-      'Drink a fresh glass of water to keep your body vibrant and focused.',
+      S('Nhắc uống nước 💧', 'Daily Hydration Check 💧'),
+      S('Uống một cốc nước để cơ thể tỉnh táo và tập trung.', 'Drink a fresh glass of water to keep your body vibrant and focused.'),
       'health',
       '14:30'
     );
@@ -307,8 +308,8 @@ async function seedInitialDemoData(userId) {
     `).run(
       sid('notif_demo_2'),
       userId,
-      'Upcoming: Team Product Sync 📅',
-      'Starting in 30 minutes at 14:00.',
+      S('Sắp tới: Họp nhóm dự án 📅', 'Upcoming: Team Product Sync 📅'),
+      S('Bắt đầu sau 30 phút, lúc 14:00.', 'Starting in 30 minutes at 14:00.'),
       'schedule',
       '13:30'
     );
@@ -330,7 +331,7 @@ async function cleanupOldGuests() {
   await db.prepare("DELETE FROM users WHERE id LIKE 'guest\\_%' ESCAPE '\\' AND created_at < ?").run(cutoff);
 }
 
-async function createGuestUser({ withSampleData = true } = {}) {
+async function createGuestUser({ withSampleData = true, lang = 'vi' } = {}) {
   const db = getDb();
   await cleanupOldGuests();
   const id = GUEST_PREFIX + crypto.randomUUID().replace(/-/g, '');
@@ -340,7 +341,7 @@ async function createGuestUser({ withSampleData = true } = {}) {
     INSERT INTO users (id, email, password_hash, salt, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
   `).run(
-    id, `${id}@guest.lifecare.local`, hash, salt, 'Khách',
+    id, `${id}@guest.lifecare.local`, hash, salt, lang === 'en' ? 'Guest' : 'Khách',
     `https://api.dicebear.com/7.x/thumbs/svg?seed=${id}`,
     'Dùng thử LifeCare',
     JSON.stringify({ willpower: 3, stress_tolerance: 3, motivation_source: 'Mục tiêu dài hạn', best_focus_time: 'morning', max_focus_minutes: 45, notes: null }),
@@ -348,7 +349,7 @@ async function createGuestUser({ withSampleData = true } = {}) {
   );
   await db.prepare(`INSERT INTO user_settings (id, user_id, theme, language, updated_at) VALUES (?, ?, 'light', 'vi', ?)`)
     .run('set_' + id, id, now);
-  if (withSampleData) await seedInitialDemoData(id);
+  if (withSampleData) await seedInitialDemoData(id, lang);
   return id;
 }
 

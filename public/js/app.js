@@ -27,6 +27,9 @@ const AppState = {
 // Múi giờ của trình duyệt, gửi kèm mọi request để server tính "hôm nay" đúng.
 const USER_TZ = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'Asia/Ho_Chi_Minh';
 const L = (vi, en) => (AppState.language === 'vi' ? vi : en);
+const PRIORITY_LABEL_VI = { high: 'CAO', medium: 'VỪA', low: 'THẤP' };
+const RECURRING_VI = { daily: 'Hằng ngày', weekly: 'Hằng tuần', monthly: 'Hằng tháng' };
+if (typeof window.tr !== 'function') window.tr = s => s;
 
 // Ngày theo giờ địa phương (toISOString() là giờ UTC, ở Việt Nam trước 7h sáng sẽ lệch sang hôm qua).
 function localDateStr(d = new Date()) {
@@ -58,6 +61,15 @@ function applyLanguage(lang) {
     const key = el.getAttribute('data-i18n');
     el.innerText = t(key);
   });
+  // Tiêu đề trang theo mục đang mở (phần tử này có data-i18n mặc định là "Bảng điều khiển")
+  const pageTitle = document.getElementById('pageTitle');
+  if (pageTitle && AppState.activeView) {
+    const v = AppState.activeView;
+    pageTitle.innerText = t('nav' + v.charAt(0).toUpperCase() + v.slice(1));
+  }
+
+  // Chữ chưa gắn data-i18n (giao diện mới, thông báo, dữ liệu mẫu) đi qua từ điển tự động
+  if (window.I18nAuto) window.I18nAuto.refresh();
 
   // Re-render dynamic active views
   if (AppState.activeView === 'dashboard') loadDashboard();
@@ -76,6 +88,7 @@ async function apiRequest(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
     'X-Timezone': USER_TZ,
+    'X-Language': AppState.language === 'en' ? 'en' : 'vi',
     ...(AppState.dataVersion ? { 'X-Data-Version': AppState.dataVersion } : {}),
     ...(AppState.token ? { 'Authorization': `Bearer ${AppState.token}` } : {}),
     ...(options.headers || {})
@@ -122,7 +135,7 @@ function showToast(message, type = 'info') {
   if (!container) return;
   const toast = document.createElement('div');
   toast.className = 'toast';
-  toast.innerHTML = `<span>${type === 'error' ? '⚠️' : '✓'}</span><span>${message}</span>`;
+  toast.innerHTML = `<span>${type === 'error' ? '⚠️' : '✓'}</span><span>${tr(message)}</span>`;
   container.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = '0';
@@ -529,7 +542,7 @@ async function loadDashboard() {
     // Sleep Metric
     if (dash.healthStatus.latestPhysical && dash.healthStatus.latestPhysical.sleep_duration) {
       document.getElementById('dashSleepDuration').innerText = `${dash.healthStatus.latestPhysical.sleep_duration}h`;
-      document.getElementById('dashSleepQuality').innerText = `${t('sleepQuality')}: ${dash.healthStatus.latestPhysical.sleep_quality || 'Good'}`;
+      document.getElementById('dashSleepQuality').innerText = `${t('sleepQuality')}: ${tr(dash.healthStatus.latestPhysical.sleep_quality || 'Good')}`;
     } else {
       document.getElementById('dashSleepDuration').innerText = '--';
       document.getElementById('dashSleepQuality').innerText = t('pendingCheckin');
@@ -537,7 +550,7 @@ async function loadDashboard() {
 
     // Mood Metric
     if (dash.emotionalStatus.latestMood) {
-      document.getElementById('dashMoodValue').innerText = `${dash.emotionalStatus.latestMood.emoji || '✨'} ${dash.emotionalStatus.latestMood.mood}`;
+      document.getElementById('dashMoodValue').innerText = `${dash.emotionalStatus.latestMood.emoji || '✨'} ${tr(dash.emotionalStatus.latestMood.mood)}`;
       document.getElementById('dashMoodSub').innerText = AppState.language === 'vi' ? 'Ghi nhận hôm nay' : 'Logged today';
     } else {
       document.getElementById('dashMoodValue').innerText = t('pendingCheckin');
@@ -629,11 +642,11 @@ function renderDashboardTasks(tasks) {
           <div class="task-title">
             ${escapeHTML(task.title)}
             ${isOverdue ? `<span class="badge badge-overdue">${t('overdue')}</span>` : ''}
-            ${task.recurring && task.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${task.recurring}</span>` : ''}
+            ${task.recurring && task.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${tr(RECURRING_VI[task.recurring] || task.recurring)}</span>` : ''}
           </div>
           <div class="task-meta">
-            <span class="badge badge-${task.category.toLowerCase()}">${task.category}</span>
-            <span class="priority-${task.priority}">${t('priorityLabel')}: ${task.priority.toUpperCase()}</span>
+            <span class="badge badge-${task.category.toLowerCase()}">${tr(task.category)}</span>
+            <span class="priority-${task.priority}">${t('priorityLabel')}: ${L(PRIORITY_LABEL_VI[task.priority] || task.priority, task.priority.toUpperCase())}</span>
             ${task.start_time ? `<span>🕒 ${task.start_time} ${task.end_time ? '– ' + task.end_time : ''}</span>` : ''}
           </div>
         </div>
@@ -655,7 +668,7 @@ function renderDashboardHealthOverview(health, mood) {
       <div style="background: var(--bg-main); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
         <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${t('healthOverview')}</div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
-          ${health.physical_condition || 'Good'} • ${health.sleep_duration || '--'}h • ${health.water_ml ? health.water_ml + ' ml' : '-- ml'}
+          ${tr(health.physical_condition || 'Good')} • ${health.sleep_duration || '--'}h • ${health.water_ml ? health.water_ml + ' ml' : '-- ml'}
         </div>
         ${health.exercise_type ? `<div style="font-size: 0.76rem; color: var(--primary); margin-top: 2px;">🏃 ${health.exercise_type} (${health.exercise_duration || 0}m)</div>` : ''}
       </div>
@@ -666,7 +679,7 @@ function renderDashboardHealthOverview(health, mood) {
       <div style="background: var(--bg-main); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
         <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${t('navMental')}</div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
-          ${mood.emoji || ''} ${mood.mood} • ${AppState.language === 'vi' ? 'Căng thẳng' : 'Stress'}: ${mood.stress_level || 2}/5
+          ${mood.emoji || ''} ${tr(mood.mood)} • ${AppState.language === 'vi' ? 'Căng thẳng' : 'Stress'}: ${mood.stress_level || 2}/5
         </div>
         ${mood.journal_entry ? `<div style="font-size: 0.76rem; font-style: italic; color: var(--text-main); margin-top: 4px;">"${escapeHTML(mood.journal_entry.substring(0, 60))}..."</div>` : ''}
       </div>
@@ -736,7 +749,8 @@ function bindProactiveBanner() {
       if (document.getElementById('rapidAiAdjust').checked) {
         const moodText = moodSelect.options[moodSelect.selectedIndex].text;
         sendAiMessage(
-          `Kiểm tra trạng thái hôm nay: tâm trạng ${moodText}, ngủ khoảng ${sleep_duration} giờ, áp lực ${stress_level}/5, năng lượng ${energy_level}/5, ý chí/động lực ${motivation_level}/5. Hãy xem lịch hôm nay và điều chỉnh nhẹ nếu cần.`,
+          L(`Kiểm tra trạng thái hôm nay: tâm trạng ${moodText}, ngủ khoảng ${sleep_duration} giờ, áp lực ${stress_level}/5, năng lượng ${energy_level}/5, ý chí/động lực ${motivation_level}/5. Hãy xem lịch hôm nay và điều chỉnh nhẹ nếu cần.`,
+            `Today's check-in: mood ${moodText}, slept about ${sleep_duration} hours, pressure ${stress_level}/5, energy ${energy_level}/5, willpower/motivation ${motivation_level}/5. Please review today's plan and adjust it gently if needed.`),
           { intent: 'daily_adjust' }
         );
       }
@@ -918,14 +932,14 @@ function filterAndRenderTaskList() {
             ${escapeHTML(tItem.title)}
             ${isOverdue ? `<span class="badge badge-overdue">${t('overdue')}</span>` : ''}
             ${isOverlap ? `<span class="badge badge-overlap">${t('overlapWarning')}</span>` : ''}
-            ${tItem.recurring && tItem.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${tItem.recurring}</span>` : ''}
+            ${tItem.recurring && tItem.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${tr(RECURRING_VI[tItem.recurring] || tItem.recurring)}</span>` : ''}
           </div>
           <div class="task-meta">
             <span>📅 ${tItem.date}</span>
             ${tItem.start_time ? `<span>🕒 ${tItem.start_time} ${tItem.end_time ? '– ' + tItem.end_time : ''}</span>` : ''}
-            <span class="badge badge-${tItem.category.toLowerCase()}">${tItem.category}</span>
-            <span class="priority-${tItem.priority}">${t('priorityLabel')}: ${tItem.priority.toUpperCase()}</span>
-            ${tItem.reminder_time ? `<span>⏰ Nhắc: ${tItem.reminder_time}</span>` : ''}
+            <span class="badge badge-${tItem.category.toLowerCase()}">${tr(tItem.category)}</span>
+            <span class="priority-${tItem.priority}">${t('priorityLabel')}: ${L(PRIORITY_LABEL_VI[tItem.priority] || tItem.priority, tItem.priority.toUpperCase())}</span>
+            ${tItem.reminder_time ? `<span>⏰ ${L('Nhắc', 'Reminder')}: ${tItem.reminder_time}</span>` : ''}
           </div>
         </div>
         <div style="display: flex; gap: 6px;">
@@ -1016,15 +1030,15 @@ async function loadPhysicalHealth() {
       <div style="background: var(--bg-main); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; margin-bottom: 12px;">
         <div style="display: flex; justify-content: space-between; font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">
           <span>📅 ${r.checkin_date}</span>
-          <span style="color: var(--primary);">${r.physical_condition || 'Good'}</span>
+          <span style="color: var(--primary);">${tr(r.physical_condition || 'Good')}</span>
         </div>
         <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 6px;">
-          💤 ${t('sleepHours')}: <strong>${r.sleep_duration ? r.sleep_duration + 'h' : '--'}</strong> (${r.sleep_quality || 'Good'}) • 💧 Nước: <strong>${r.water_ml ? r.water_ml + ' ml' : '--'}</strong> • ⚡ Năng lượng: <strong>${r.energy_level || '--'}/5</strong>
+          💤 ${t('sleepHours')}: <strong>${r.sleep_duration ? r.sleep_duration + 'h' : '--'}</strong> (${tr(r.sleep_quality || 'Good')}) • 💧 ${L('Nước', 'Water')}: <strong>${r.water_ml ? r.water_ml + ' ml' : '--'}</strong> • ⚡ ${L('Năng lượng', 'Energy')}: <strong>${r.energy_level || '--'}/5</strong>
         </div>
-        ${r.exercise_type ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🏃 Vận động: <strong>${escapeHTML(r.exercise_type)}</strong> (${r.exercise_duration || 0} phút)</div>` : ''}
-        ${r.meals_summary ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🥗 Dự kiến bữa ăn: ${escapeHTML(r.meals_summary)}</div>` : ''}
-        ${r.discomfort ? `<div style="font-size: 0.78rem; color: #DC2626; margin-top: 4px;">⚠️ Triệu chứng: ${escapeHTML(r.discomfort)}</div>` : ''}
-        ${r.notes ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">"${escapeHTML(r.notes)}"</div>` : ''}
+        ${r.exercise_type ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🏃 ${L('Vận động', 'Activity')}: <strong>${escapeHTML(r.exercise_type)}</strong> (${r.exercise_duration || 0} ${L('phút', 'min')})</div>` : ''}
+        ${r.meals_summary ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🥗 ${L('Dự kiến bữa ăn', 'Planned meals')}: ${escapeHTML(r.meals_summary)}</div>` : ''}
+        ${r.discomfort ? `<div style="font-size: 0.78rem; color: #DC2626; margin-top: 4px;">⚠️ ${L('Triệu chứng', 'Symptoms')}: ${escapeHTML(tr(r.discomfort))}</div>` : ''}
+        ${r.notes ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">"${escapeHTML(tr(r.notes))}"</div>` : ''}
       </div>
     `).join('');
   } catch (err) {
@@ -1104,10 +1118,10 @@ async function loadMentalHealth() {
       <div class="journal-entry-card">
         <div class="journal-date">
           <span>📅 ${m.checkin_date}</span>
-          <span>${m.emoji || '✨'} ${m.mood}</span>
+          <span>${m.emoji || '✨'} ${tr(m.mood)}</span>
         </div>
         <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px;">
-          Căng thẳng: <strong>${m.stress_level || '--'}/5</strong> • Động lực: <strong>${m.motivation_level || '--'}/5</strong> • Kết nối: <strong>${m.connected_score || '--'}/5</strong>
+          ${L('Căng thẳng', 'Stress')}: <strong>${m.stress_level || '--'}/5</strong> • ${L('Động lực', 'Motivation')}: <strong>${m.motivation_level || '--'}/5</strong> • ${L('Kết nối', 'Connection')}: <strong>${m.connected_score || '--'}/5</strong>
         </div>
         ${m.journal_entry ? `<div class="journal-content">📖 "${escapeHTML(m.journal_entry)}"</div>` : ''}
         ${m.emotional_notes && !m.journal_entry ? `<div class="journal-content" style="font-style: italic;">"${escapeHTML(m.emotional_notes)}"</div>` : ''}
@@ -1139,7 +1153,7 @@ function renderMoodCalendar(records) {
     const dayRecord = moodMap.get(dateStr);
     const dayLabel = dateStr.substring(8);
     html += `
-      <div class="mood-cal-cell" title="${dateStr}: ${dayRecord ? dayRecord.mood : 'Chưa ghi'}">
+      <div class="mood-cal-cell" title="${dateStr}: ${dayRecord ? tr(dayRecord.mood) : L('Chưa ghi', 'Not logged')}">
         <span class="date-num">${dayLabel}</span>
         <span class="mood-icon">${dayRecord ? dayRecord.emoji : '⚪'}</span>
       </div>
@@ -1180,30 +1194,30 @@ async function loadTimeline(range = '30days') {
           <div class="timeline-card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
               <strong style="font-size: 1rem; color: var(--text-heading);">📅 ${item.date}</strong>
-              ${m ? `<span class="badge" style="background: var(--accent-light); color: var(--accent); font-size: 0.82rem;">${m.emoji || '✨'} ${m.mood}</span>` : ''}
+              ${m ? `<span class="badge" style="background: var(--accent-light); color: var(--accent); font-size: 0.82rem;">${m.emoji || '✨'} ${tr(m.mood)}</span>` : ''}
             </div>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 8px;">
               ${h ? `
                 <div style="font-size: 0.82rem; color: var(--text-muted);">
-                  💤 Giấc ngủ: <strong>${h.sleep_duration ? h.sleep_duration + 'h' : '--'}</strong><br/>
-                  💧 Nước uống: <strong>${h.water_ml ? h.water_ml + ' ml' : '--'}</strong><br/>
-                  🏃 Vận động: <strong>${h.exercise_status || 'Không'}</strong> ${h.exercise_type ? '(' + h.exercise_type + ')' : ''}
+                  💤 ${L('Giấc ngủ', 'Sleep')}: <strong>${h.sleep_duration ? h.sleep_duration + 'h' : '--'}</strong><br/>
+                  💧 ${L('Nước uống', 'Water')}: <strong>${h.water_ml ? h.water_ml + ' ml' : '--'}</strong><br/>
+                  🏃 ${L('Vận động', 'Activity')}: <strong>${tr(h.exercise_status || 'No')}</strong> ${h.exercise_type ? '(' + h.exercise_type + ')' : ''}
                 </div>
-              ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">Chưa điểm danh thể chất</div>'}
+              ` : `<div style="font-size: 0.82rem; color: var(--text-muted);">${L('Chưa điểm danh thể chất', 'No physical check-in')}</div>`}
 
               ${m ? `
                 <div style="font-size: 0.82rem; color: var(--text-muted);">
-                  ⚡ Căng thẳng: <strong>${m.stress_level || '--'}/5</strong><br/>
-                  🌱 Động lực: <strong>${m.motivation_level || '--'}/5</strong><br/>
-                  🧘 Thư thái: <strong>${m.relaxed_score || '--'}/5</strong>
+                  ⚡ ${L('Căng thẳng', 'Stress')}: <strong>${m.stress_level || '--'}/5</strong><br/>
+                  🌱 ${L('Động lực', 'Motivation')}: <strong>${m.motivation_level || '--'}/5</strong><br/>
+                  🧘 ${L('Thư thái', 'Relaxation')}: <strong>${m.relaxed_score || '--'}/5</strong>
                 </div>
-              ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">Chưa phản chiếu tâm trạng</div>'}
+              ` : `<div style="font-size: 0.82rem; color: var(--text-muted);">${L('Chưa phản chiếu tâm trạng', 'No mood reflection')}</div>`}
             </div>
 
             ${tasks.length > 0 ? `
               <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-color); font-size: 0.8rem; color: var(--text-muted);">
-                Đã hoàn thành ${tasks.filter(tItem => tItem.status === 'completed').length} / ${tasks.length} công việc
+                ${L('Đã hoàn thành', 'Completed')} ${tasks.filter(tItem => tItem.status === 'completed').length} / ${tasks.length} ${L('công việc', 'tasks')}
               </div>
             ` : ''}
 
@@ -1254,7 +1268,7 @@ async function loadStatistics(startDate = null, endDate = null) {
     AppState.charts.category = new Chart(ctxCategory, {
       type: 'doughnut',
       data: {
-        labels: catLabels.length > 0 ? catLabels : ['Chưa có công việc'],
+        labels: catLabels.length > 0 ? catLabels.map(tr) : [L('Chưa có công việc', 'No tasks yet')],
         datasets: [{
           data: catData.length > 0 ? catData : [1],
           backgroundColor: catLabels.length > 0 ? ['#6C9CE8', '#A8D5BA', '#B8A5E8', '#FBBF24', '#38BDF8', '#94A3B8'] : ['#CBD5E1']
@@ -1277,7 +1291,7 @@ async function loadStatistics(startDate = null, endDate = null) {
     AppState.charts.mood = new Chart(ctxMood, {
       type: 'pie',
       data: {
-        labels: moodLabels.length > 0 ? moodLabels : ['Chưa có dữ liệu'],
+        labels: moodLabels.length > 0 ? moodLabels.map(tr) : [L('Chưa có dữ liệu', 'No data yet')],
         datasets: [{
           data: moodData.length > 0 ? moodData : [1],
           backgroundColor: moodLabels.length > 0 ? ['#10B981', '#3B82F6', '#8B5CF6', '#F59E0B', '#EF4444', '#6B7280'] : ['#CBD5E1']
@@ -1352,7 +1366,7 @@ async function loadStatistics(startDate = null, endDate = null) {
       const s = document.getElementById('statsStartDate').value;
       const e = document.getElementById('statsEndDate').value;
       if (!s || !e) {
-        showToast('Vui lòng chọn cả ngày bắt đầu và kết thúc', 'error');
+        showToast(L('Vui lòng chọn cả ngày bắt đầu và kết thúc', 'Please choose both a start and end date'), 'error');
         return;
       }
       loadStatistics(s, e);
