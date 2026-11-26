@@ -51,16 +51,53 @@
 
 ## 🚀 Getting Started
 
-### Database Configuration (Turso / Local SQLite)
-LifeCare hỗ trợ 2 chế độ cơ sở dữ liệu:
-1. **Turso Cloud Database (libSQL)** – Khuyên dùng cho môi trường production / Vercel Serverless:
-   - Thêm biến môi trường trên Vercel (Project Settings > Environment Variables):
-     - `TURSO_DATABASE_URL`: URL kết nối (ví dụ: `libsql://your-db.turso.io`)
-     - `TURSO_AUTH_TOKEN`: Token xác thực Turso
-   - Hệ thống cũng hỗ trợ tiền tố `TURBO_DATABASE_URL` và `TURBO_AUTH_TOKEN`.
-   - Khi có các biến này, ứng dụng sẽ tự động đồng bộ và lưu trữ dữ liệu vĩnh viễn trên Turso Cloud.
-2. **Local SQLite File:**
-   - Khi chạy ở môi trường local hoặc không cấu hình Turso, hệ thống tự động sử dụng file SQLite nội bộ (`data/lifecare.sqlite`).
+### Lưu dữ liệu: Google Sheet / JSON (có mã hoá)
+Khi chạy, dữ liệu nằm trong một SQLite trong bộ nhớ. Sau mỗi thay đổi, server mã hoá các trường nhạy cảm rồi ghi ra:
+1. **Google Sheet** (khi đặt `GOOGLE_SHEET_ID` + `GOOGLE_SERVICE_ACCOUNT_JSON`). Mỗi bảng là một tab, tab `_meta` giữ phiên bản dữ liệu. Dùng cho bản deploy trên Vercel.
+2. **File JSON** `data/lifecare-store.json` (mặc định khi chạy trên máy).
+
+**Mã hoá (AES-256-GCM)** bằng khoá `DATA_ENCRYPTION_KEY`. Các trường được mã hoá:
+- email, họ tên, ngày sinh, giới tính, mục tiêu cá nhân, tâm lý nền;
+- ngày/giờ của công việc, khung giờ, gián đoạn và tiến độ;
+- toàn bộ dữ liệu sức khoẻ và tâm trạng;
+- nội dung chat AI;
+- token phiên đăng nhập.
+
+Tiêu đề và mô tả công việc để nguyên. Mật khẩu vốn đã được băm một chiều (PBKDF2). Danh sách cột mã hoá nằm trong `server/crypto-fields.js`.
+
+> ⚠️ Mất hoặc đổi `DATA_ENCRYPTION_KEY` là không đọc lại được dữ liệu cũ. Khi chạy trên máy mà chưa đặt khoá, server tự tạo `data/.encryption-key` (không commit file này).
+
+#### Thiết lập Google Sheet (một lần)
+1. Vào https://console.cloud.google.com/, tạo project mới (hoặc dùng project có sẵn).
+2. **APIs & Services → Library**, bật **Google Sheets API**.
+3. **APIs & Services → Credentials → Create credentials → Service account**: đặt tên, bỏ qua phần phân quyền, bấm Done.
+4. Mở service account vừa tạo → **Keys → Add key → Create new key → JSON**, tải file về. Giữ kín file này.
+5. Tạo một Google Sheet trống. Bấm **Share**, thêm email của service account (dạng `...@...iam.gserviceaccount.com`) với quyền **Editor**.
+6. Lấy **ID** của Sheet: phần nằm giữa `/d/` và `/edit` trên URL.
+7. Trên Vercel (Project → Settings → Environment Variables), thêm các biến sau rồi deploy lại:
+   - `GOOGLE_SHEET_ID`: ID ở bước 6.
+   - `GOOGLE_SERVICE_ACCOUNT_JSON`: dán toàn bộ nội dung file JSON ở bước 4. Có thể dán dạng base64: `base64 -i key.json`.
+   - `DATA_ENCRYPTION_KEY`: tạo bằng lệnh `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+   - `GROQ_API_KEY`: để bật trợ lý AI.
+
+Không sửa tay dữ liệu trong Sheet: các ô `enc:v1:...` là bản mã. Nếu sửa tay, nhớ tăng phiên bản ở ô `_meta!A1` để server nạp lại.
+
+### Lập lịch theo khung giờ & mục tiêu
+- **Thời gian biểu (time block)**: chia ngày thành ngủ nghỉ, ăn uống, đi học, học thêm, giải trí, tập luyện, tự học. Thiết lập một lần (có mẫu học sinh / sinh viên / người đi làm), áp dụng cho cả tuần hoặc các ngày được chọn, tự lặp mỗi tuần. Thời gian còn trống do AI phân bổ theo mục tiêu và thói quen.
+- **Mục tiêu lớn**: AI chia thành công việc cụ thể, gồm thời lượng, ưu tiên và hạn. Người dùng sửa từng việc, hoặc báo "mình đang bị trễ" để AI chỉ điều chỉnh phần cần thiết.
+- **Gián đoạn**: khai báo sự cố, nghỉ học, việc phát sinh hoặc thời gian bận. AI xếp lại theo ưu tiên, hạn chót và thời gian còn lại, không dồn hết sang hôm sau.
+- **Tiến độ & dự báo**: hiển thị % hoàn thành và các cột mốc 25/50/75/100%. Có thể ghi thêm phần học/làm ngoài lịch. App dự báo ngày xong (sớm/trễ so với hạn) và cảnh báo khi mục tiêu không còn khả thi.
+- **Nhắc việc**: khi đến giờ mà chưa xác nhận hoàn thành, app nhắc lại sau số phút tuỳ chỉnh, tôn trọng giờ yên tĩnh. Có thể bật thông báo trình duyệt.
+- **Tâm lý nền + kiểm tra trạng thái hằng ngày**: hồ sơ tâm lý / ý chí được đặt cố định. Mỗi ngày lần đầu vào web, app hỏi nhanh trạng thái, rồi AI điều chỉnh nhẹ lịch hôm đó.
+- Lượng nước tính bằng **ml**. Mục bữa ăn đổi thành "Dự kiến bữa ăn / chế độ dinh dưỡng".
+
+### Trợ lý AI (Groq)
+Trợ lý AI chạy bằng mô hình ngôn ngữ thật qua Groq (`server/llm-assistant.js`):
+- Đọc hồ sơ, lịch (7 ngày trước đến 14 ngày tới), check-in sức khoẻ và tâm trạng gần đây của người dùng.
+- **Tự thêm / sửa / xoá / đánh dấu hoàn thành công việc** trong Kế Hoạch khi người dùng yêu cầu; giao diện tự tải lại lịch.
+- Nhớ hội thoại (bảng `ai_chats`); tin nhắn có dấu hiệu khủng hoảng luôn được trả lời ngay bằng thông tin hỗ trợ khẩn cấp.
+
+Biến môi trường: `GROQ_API_KEY` (bắt buộc để bật AI), `GROQ_MODEL` (mặc định `openai/gpt-oss-120b`), `APP_TIMEZONE` (mặc định `Asia/Ho_Chi_Minh`). Không có `GROQ_API_KEY` thì trợ lý dùng bộ luật trả lời cố định như trước.
 
 ### Prerequisites
 - Node.js (v18+ recommended)
@@ -69,9 +106,6 @@ LifeCare hỗ trợ 2 chế độ cơ sở dữ liệu:
 ```bash
 # Cài đặt dependencies
 npm install
-
-# Khởi tạo database (tùy chọn)
-npm run db:setup
 
 # Start the server
 node server.js

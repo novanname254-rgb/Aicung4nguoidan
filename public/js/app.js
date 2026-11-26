@@ -17,8 +17,22 @@ const AppState = {
   theme: localStorage.getItem('lifecare_theme') || 'light',
   language: localStorage.getItem('lifecare_lang') || 'vi',
   aiMode: 'schedule', // 'schedule', 'wellness', 'insight'
-  deferredPwaPrompt: null
+  deferredPwaPrompt: null,
+  calendarAnchor: null, // ngày đang xem trong Kế hoạch (YYYY-MM-DD)
+  routineAnchor: null,  // thứ Hai của tuần đang xem trong Thời gian biểu
+  goals: [],
+  settings: null
 };
+
+// Múi giờ của trình duyệt, gửi kèm mọi request để server tính "hôm nay" đúng.
+const USER_TZ = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'Asia/Ho_Chi_Minh';
+const L = (vi, en) => (AppState.language === 'vi' ? vi : en);
+
+// Ngày theo giờ địa phương (toISOString() là giờ UTC, ở Việt Nam trước 7h sáng sẽ lệch sang hôm qua).
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const todayLocal = () => localDateStr();
 
 // I18N Helper
 function t(key) {
@@ -48,6 +62,8 @@ function applyLanguage(lang) {
   // Re-render dynamic active views
   if (AppState.activeView === 'dashboard') loadDashboard();
   else if (AppState.activeView === 'planner') loadPlanner();
+  else if (AppState.activeView === 'routine') loadRoutine();
+  else if (AppState.activeView === 'goals') loadGoals();
   else if (AppState.activeView === 'physical') loadPhysicalHealth();
   else if (AppState.activeView === 'mental') loadMentalHealth();
   else if (AppState.activeView === 'timeline') loadTimeline('30days');
@@ -59,6 +75,7 @@ function applyLanguage(lang) {
 async function apiRequest(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
+    'X-Timezone': USER_TZ,
     ...(AppState.token ? { 'Authorization': `Bearer ${AppState.token}` } : {}),
     ...(options.headers || {})
   };
@@ -112,6 +129,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindAiChat();
   bindSettings();
   bindProactiveBanner();
+  bindPlanningUI();     // planning-ui.js: thời gian biểu, mục tiêu, gián đoạn, lịch tuần/ngày
+  startReminderEngine(); // planning-ui.js: nhắc khi đến giờ mà chưa xác nhận hoàn thành
 
   // Apply initial language
   applyLanguage(AppState.language);
@@ -123,6 +142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       AppState.user = data.user;
       updateUserUI();
       loadDashboard();
+      afterLoginInit();
     } catch (e) {
       showAuthModal(true);
     }
@@ -141,6 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       AppState.user = loginRes.user;
       updateUserUI();
       loadDashboard();
+      afterLoginInit();
     } catch (err) {
       showAuthModal(true);
     }
@@ -263,6 +284,8 @@ function navigateToView(viewName) {
   const titles = {
     dashboard: t('navDashboard'),
     planner: t('navPlanner'),
+    routine: t('navRoutine'),
+    goals: t('navGoals'),
     physical: t('navPhysical'),
     mental: t('navMental'),
     timeline: t('navTimeline'),
@@ -273,6 +296,8 @@ function navigateToView(viewName) {
 
   if (viewName === 'dashboard') loadDashboard();
   else if (viewName === 'planner') loadPlanner();
+  else if (viewName === 'routine') loadRoutine();
+  else if (viewName === 'goals') loadGoals();
   else if (viewName === 'physical') loadPhysicalHealth();
   else if (viewName === 'mental') loadMentalHealth();
   else if (viewName === 'timeline') loadTimeline('30days');
@@ -433,7 +458,7 @@ async function loadDashboard() {
   container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">⌛ Đang tải dữ liệu...</div>`;
 
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayLocal();
     const data = await apiRequest(`/api/dashboard?date=${todayStr}`);
     const dash = data.data;
 
@@ -498,6 +523,8 @@ async function loadDashboard() {
 
     // Schedule recommendations
     loadScheduleRecommendations();
+    loadGoalAlerts();
+    maybePromptDailyCheckin(dash.healthStatus.todayCheckinCompleted);
   } catch (err) {
     container.innerHTML = `<div style="text-align: center; padding: 24px; color: #DC2626;">⚠️ Không thể tải dữ liệu: ${err.message}</div>`;
   }
@@ -552,7 +579,7 @@ function renderDashboardTasks(tasks) {
     return;
   }
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = todayLocal();
 
   container.innerHTML = tasks.map(task => {
     const isOverdue = task.status !== 'completed' && task.date < todayStr;
@@ -589,7 +616,7 @@ function renderDashboardHealthOverview(health, mood) {
       <div style="background: var(--bg-main); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
         <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${t('healthOverview')}</div>
         <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
-          ${health.physical_condition || 'Good'} • ${health.sleep_duration || '--'}h • ${health.water_intake || '--'}L
+          ${health.physical_condition || 'Good'} • ${health.sleep_duration || '--'}h • ${health.water_ml ? health.water_ml + ' ml' : '-- ml'}
         </div>
         ${health.exercise_type ? `<div style="font-size: 0.76rem; color: var(--primary); margin-top: 2px;">🏃 ${health.exercise_type} (${health.exercise_duration || 0}m)</div>` : ''}
       </div>
@@ -640,25 +667,40 @@ function bindProactiveBanner() {
   document.getElementById('rapidCheckinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const mood = document.getElementById('rapidMood').value;
+      const moodSelect = document.getElementById('rapidMood');
+      const mood = moodSelect.value;
       const sleep_duration = parseFloat(document.getElementById('rapidSleep').value);
       const stress_level = parseInt(document.getElementById('rapidStress').value);
+      const energy_level = parseInt(document.getElementById('rapidEnergy').value);
+      const motivation_level = parseInt(document.getElementById('rapidMotivation').value);
+      const emoji = moodSelect.options[moodSelect.selectedIndex].text.split(' ')[0];
 
       await apiRequest('/api/checkin/quick', {
         method: 'POST',
         body: JSON.stringify({
           mood,
+          emoji,
           sleep_duration,
           stress_level,
-          physical_condition: sleep_duration >= 7 ? 'Good' : 'Tired',
-          water_intake: 2.0
+          energy_level,
+          motivation_level,
+          physical_condition: energy_level >= 4 ? 'Good' : energy_level <= 2 ? 'Tired' : 'Normal'
         })
       });
 
       closeRapid();
       document.getElementById('proactiveBanner').style.display = 'none';
-      showToast(AppState.language === 'vi' ? 'Điểm danh 30 giây thành công!' : '30-second check-in saved!');
+      showToast(AppState.language === 'vi' ? 'Đã ghi nhận trạng thái hôm nay!' : 'Today\'s check-in saved!');
       loadDashboard();
+
+      // AI so sánh với tâm lý nền rồi điều chỉnh nhẹ lịch hôm nay
+      if (document.getElementById('rapidAiAdjust').checked) {
+        const moodText = moodSelect.options[moodSelect.selectedIndex].text;
+        sendAiMessage(
+          `Kiểm tra trạng thái hôm nay: tâm trạng ${moodText}, ngủ khoảng ${sleep_duration} giờ, áp lực ${stress_level}/5, năng lượng ${energy_level}/5, ý chí/động lực ${motivation_level}/5. Hãy xem lịch hôm nay và điều chỉnh nhẹ nếu cần.`,
+          { intent: 'daily_adjust' }
+        );
+      }
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -691,17 +733,20 @@ function bindPlannerEvents() {
       const end_time = document.getElementById('taskEndTime').value;
       const recurring = document.getElementById('taskRecurring').value;
       const reminder_time = document.getElementById('taskReminderTime').value;
+      const goal_id = document.getElementById('taskGoal').value;
+      const duration_minutes = document.getElementById('taskDuration').value;
+      const deadline = document.getElementById('taskDeadline').value;
 
       if (id) {
         await apiRequest(`/api/tasks/${id}`, {
           method: 'PUT',
-          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time, recurring, reminder_time })
+          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time, recurring, reminder_time, goal_id, duration_minutes, deadline })
         });
         showToast(AppState.language === 'vi' ? 'Đã cập nhật công việc.' : 'Task updated.');
       } else {
         const res = await apiRequest('/api/tasks', {
           method: 'POST',
-          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time, recurring, reminder_time })
+          body: JSON.stringify({ title, description, category, priority, date, start_time, end_time, recurring, reminder_time, goal_id, duration_minutes, deadline })
         });
         showToast(AppState.language === 'vi' ? 'Đã tạo công việc mới.' : 'Task created.');
         if (res.overlapWarning) {
@@ -710,8 +755,8 @@ function bindPlannerEvents() {
       }
 
       taskModal.classList.remove('active');
-      loadPlanner();
-      if (AppState.activeView === 'dashboard') loadDashboard();
+      refreshActiveView();
+      refreshReminderTasks();
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -739,14 +784,15 @@ async function loadPlanner() {
     const data = await apiRequest('/api/tasks');
     AppState.tasks = data.tasks || [];
     AppState.overlaps = data.overlaps || [];
-    renderCalendar();
+    renderCalendar(); // planning-ui.js
     filterAndRenderTaskList();
+    refreshGoalOptions();
   } catch (err) {
     container.innerHTML = `<div style="text-align: center; padding: 24px; color: #DC2626;">⚠️ Lỗi: ${err.message}</div>`;
   }
 }
 
-function openTaskModal(task = null, defaultDate = null) {
+function openTaskModal(task = null, defaultDate = null, defaultStart = '', defaultEnd = '') {
   const modal = document.getElementById('taskModal');
   const title = document.getElementById('taskModalTitle');
   document.getElementById('taskIdInput').value = task ? task.id : '';
@@ -754,9 +800,12 @@ function openTaskModal(task = null, defaultDate = null) {
   document.getElementById('taskDesc').value = task ? (task.description || '') : '';
   document.getElementById('taskCategory').value = task ? task.category : 'Work';
   document.getElementById('taskPriority').value = task ? task.priority : 'medium';
-  document.getElementById('taskDate').value = task ? task.date : (defaultDate || new Date().toISOString().split('T')[0]);
-  document.getElementById('taskStartTime').value = task ? (task.start_time || '') : '';
-  document.getElementById('taskEndTime').value = task ? (task.end_time || '') : '';
+  document.getElementById('taskDate').value = task ? task.date : (defaultDate || todayLocal());
+  document.getElementById('taskStartTime').value = task ? (task.start_time || '') : defaultStart;
+  document.getElementById('taskEndTime').value = task ? (task.end_time || '') : defaultEnd;
+  refreshGoalOptions().then(() => { document.getElementById('taskGoal').value = task ? (task.goal_id || '') : ''; });
+  document.getElementById('taskDuration').value = task ? (task.duration_minutes || '') : '';
+  document.getElementById('taskDeadline').value = task ? (task.deadline || '') : '';
   document.getElementById('taskRecurring').value = task ? (task.recurring || 'none') : 'none';
   document.getElementById('taskReminderTime').value = task ? (task.reminder_time || '') : '';
 
@@ -772,8 +821,8 @@ async function toggleTaskStatus(taskId, completed) {
     });
     const tItem = AppState.tasks.find(x => x.id === taskId);
     if (tItem) tItem.status = completed ? 'completed' : 'pending';
-    if (AppState.activeView === 'dashboard') loadDashboard();
-    if (AppState.activeView === 'planner') loadPlanner();
+    refreshActiveView();
+    refreshReminderTasks();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -784,93 +833,11 @@ async function deleteTask(taskId) {
     try {
       await apiRequest(`/api/tasks/${taskId}`, { method: 'DELETE' });
       showToast(AppState.language === 'vi' ? 'Đã xóa công việc.' : 'Task removed.');
-      loadPlanner();
-      if (AppState.activeView === 'dashboard') loadDashboard();
+      refreshActiveView();
+      refreshReminderTasks();
     } catch (err) {
       showToast(err.message, 'error');
     }
-  }
-}
-
-function renderCalendar() {
-  const container = document.getElementById('calendarDisplayArea');
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-
-  if (AppState.calendarView === 'month') {
-    const firstDayIndex = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const monthNames = AppState.language === 'vi'
-      ? ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12']
-      : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-    let html = `
-      <div style="font-weight: 800; font-size: 1.1rem; color: var(--text-heading); margin-bottom: 12px;">
-        ${monthNames[month]} ${year}
-      </div>
-      <div class="month-grid">
-        <div class="month-day-header">CN</div>
-        <div class="month-day-header">T2</div>
-        <div class="month-day-header">T3</div>
-        <div class="month-day-header">T4</div>
-        <div class="month-day-header">T5</div>
-        <div class="month-day-header">T6</div>
-        <div class="month-day-header">T7</div>
-    `;
-
-    for (let i = 0; i < firstDayIndex; i++) {
-      html += `<div class="month-day-cell" style="opacity: 0.3; background: transparent;"></div>`;
-    }
-
-    const todayDateStr = today.toISOString().split('T')[0];
-
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const isToday = dayStr === todayDateStr;
-      const dayTasks = AppState.tasks.filter(t => t.date === dayStr);
-
-      html += `
-        <div class="month-day-cell ${isToday ? 'today' : ''}" onclick="openTaskModal(null, '${dayStr}')">
-          <div class="day-num">${day} ${isToday ? '•' : ''}</div>
-          ${dayTasks.slice(0, 2).map(t => `<div class="day-tasks-pill">${escapeHTML(t.title)}</div>`).join('')}
-          ${dayTasks.length > 2 ? `<div style="font-size: 0.65rem; color: var(--primary); font-weight: 700;">+${dayTasks.length - 2}</div>` : ''}
-        </div>
-      `;
-    }
-
-    html += `</div>`;
-    container.innerHTML = html;
-  } else {
-    // Week or Day view
-    const todayStr = today.toISOString().split('T')[0];
-    const filtered = AppState.calendarView === 'day' 
-      ? AppState.tasks.filter(t => t.date === todayStr)
-      : AppState.tasks;
-
-    container.innerHTML = `
-      <div style="padding: 12px 0;">
-        <h4 style="margin-bottom: 12px;">${AppState.calendarView === 'day' ? (AppState.language === 'vi' ? 'Công việc hôm nay (' + todayStr + ')' : 'Tasks for Today (' + todayStr + ')') : (AppState.language === 'vi' ? 'Tất cả công việc' : 'All Tasks')}</h4>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          ${filtered.length === 0 ? `<p style="color: var(--text-muted);">${t('noMatchingTasks')}</p>` : filtered.map(tItem => `
-            <div class="task-item" style="margin-bottom: 0;">
-              <input type="checkbox" class="task-checkbox" ${tItem.status === 'completed' ? 'checked' : ''} onchange="toggleTaskStatus('${tItem.id}', this.checked)" />
-              <div class="task-details">
-                <div class="task-title">
-                  ${escapeHTML(tItem.title)}
-                  ${tItem.recurring && tItem.recurring !== 'none' ? `<span class="badge badge-recurring">🔄 ${tItem.recurring}</span>` : ''}
-                </div>
-                <div class="task-meta">
-                  <span>📅 ${tItem.date}</span>
-                  ${tItem.start_time ? `<span>🕒 ${tItem.start_time} - ${tItem.end_time || ''}</span>` : ''}
-                  <span class="badge badge-${tItem.category.toLowerCase()}">${tItem.category}</span>
-                </div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
   }
 }
 
@@ -879,7 +846,7 @@ function filterAndRenderTaskList() {
   const search = document.getElementById('taskSearchInput').value.toLowerCase();
   const cat = document.getElementById('taskCategoryFilter').value;
   const prio = document.getElementById('taskPriorityFilter').value;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = todayLocal();
 
   const filtered = AppState.tasks.filter(tItem => {
     const matchSearch = tItem.title.toLowerCase().includes(search) || (tItem.description && tItem.description.toLowerCase().includes(search));
@@ -952,7 +919,7 @@ function bindHealthEvents() {
   document.getElementById('physicalCheckinForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const checkin_date = document.getElementById('physDate').value || new Date().toISOString().split('T')[0];
+      const checkin_date = document.getElementById('physDate').value || todayLocal();
       const physical_condition = document.getElementById('physCondition').value;
       const sleep_duration = document.getElementById('physSleepHours').value;
       const sleep_quality = document.getElementById('physSleepQuality').value;
@@ -960,7 +927,7 @@ function bindHealthEvents() {
       const exercise_type = document.getElementById('physExerciseType').value;
       const exercise_duration = document.getElementById('physExerciseDuration').value;
       const meals_summary = document.getElementById('physMealsSummary').value;
-      const water_intake = document.getElementById('physWater').value;
+      const water_ml = document.getElementById('physWater').value;
       const energy_level = document.getElementById('physEnergyLevel').value;
       const discomfort = document.getElementById('physDiscomfort').value;
       const notes = document.getElementById('physNotes').value;
@@ -976,7 +943,7 @@ function bindHealthEvents() {
           exercise_type,
           exercise_duration,
           meals_summary,
-          water_intake,
+          water_ml,
           energy_level,
           discomfort,
           notes
@@ -993,7 +960,7 @@ function bindHealthEvents() {
 }
 
 async function loadPhysicalHealth() {
-  document.getElementById('physDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('physDate').value = todayLocal();
   const container = document.getElementById('physicalHistoryList');
   container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">⌛ Đang tải lịch sử thể chất...</div>`;
 
@@ -1013,10 +980,10 @@ async function loadPhysicalHealth() {
           <span style="color: var(--primary);">${r.physical_condition || 'Good'}</span>
         </div>
         <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 6px;">
-          💤 ${t('sleepHours')}: <strong>${r.sleep_duration ? r.sleep_duration + 'h' : '--'}</strong> (${r.sleep_quality || 'Good'}) • 💧 Nước: <strong>${r.water_intake ? r.water_intake + 'L' : '--'}</strong> • ⚡ Năng lượng: <strong>${r.energy_level || '--'}/5</strong>
+          💤 ${t('sleepHours')}: <strong>${r.sleep_duration ? r.sleep_duration + 'h' : '--'}</strong> (${r.sleep_quality || 'Good'}) • 💧 Nước: <strong>${r.water_ml ? r.water_ml + ' ml' : '--'}</strong> • ⚡ Năng lượng: <strong>${r.energy_level || '--'}/5</strong>
         </div>
         ${r.exercise_type ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🏃 Vận động: <strong>${escapeHTML(r.exercise_type)}</strong> (${r.exercise_duration || 0} phút)</div>` : ''}
-        ${r.meals_summary ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🥗 Bữa ăn: ${escapeHTML(r.meals_summary)}</div>` : ''}
+        ${r.meals_summary ? `<div style="font-size: 0.8rem; color: var(--text-heading); margin-top: 4px;">🥗 Dự kiến bữa ăn: ${escapeHTML(r.meals_summary)}</div>` : ''}
         ${r.discomfort ? `<div style="font-size: 0.78rem; color: #DC2626; margin-top: 4px;">⚠️ Triệu chứng: ${escapeHTML(r.discomfort)}</div>` : ''}
         ${r.notes ? `<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; font-style: italic;">"${escapeHTML(r.notes)}"</div>` : ''}
       </div>
@@ -1125,7 +1092,7 @@ function renderMoodCalendar(records) {
   for (let i = 13; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    pastDays.push(d.toISOString().split('T')[0]);
+    pastDays.push(localDateStr(d));
   }
 
   let html = `<div class="mood-calendar-grid">`;
@@ -1181,7 +1148,7 @@ async function loadTimeline(range = '30days') {
               ${h ? `
                 <div style="font-size: 0.82rem; color: var(--text-muted);">
                   💤 Giấc ngủ: <strong>${h.sleep_duration ? h.sleep_duration + 'h' : '--'}</strong><br/>
-                  💧 Nước uống: <strong>${h.water_intake ? h.water_intake + 'L' : '--'}</strong><br/>
+                  💧 Nước uống: <strong>${h.water_ml ? h.water_ml + ' ml' : '--'}</strong><br/>
                   🏃 Vận động: <strong>${h.exercise_status || 'Không'}</strong> ${h.exercise_type ? '(' + h.exercise_type + ')' : ''}
                 </div>
               ` : '<div style="font-size: 0.82rem; color: var(--text-muted);">Chưa điểm danh thể chất</div>'}
@@ -1413,50 +1380,94 @@ function bindAiChat() {
     });
   });
 
-  form.addEventListener('submit', async (e) => {
+  form.addEventListener('submit', (e) => {
     e.preventDefault();
     const userMsg = input.value.trim();
     if (!userMsg) return;
-
-    appendChatBubble('user', userMsg);
     input.value = '';
-
-    const loadingBubble = appendChatBubble('assistant', AppState.language === 'vi' ? 'LifeCare AI đang suy nghĩ...' : 'LifeCare AI is reflecting...');
-
-    try {
-      const res = await apiRequest('/api/ai/chat', {
-        method: 'POST',
-        body: JSON.stringify({ message: userMsg, mode: AppState.aiMode, language: AppState.language })
-      });
-
-      loadingBubble.remove();
-      appendChatBubble('assistant', res.reply);
-
-      if (res.suggestedTasks && res.suggestedTasks.length > 0) {
-        const suggestionDiv = document.createElement('div');
-        suggestionDiv.style.padding = '8px 12px';
-        suggestionDiv.style.fontSize = '0.8rem';
-        suggestionDiv.style.background = 'var(--primary-light)';
-        suggestionDiv.style.borderRadius = 'var(--radius-sm)';
-        suggestionDiv.style.marginTop = '6px';
-        suggestionDiv.innerHTML = `
-          <strong>${t('addAiTaskBtn')}:</strong> "${res.suggestedTasks[0].title}"
-          <br/><button class="btn btn-primary" style="font-size: 0.72rem; padding: 4px 8px; margin-top: 4px;" onclick='addAiSuggestedTask(${JSON.stringify(res.suggestedTasks[0]).replace(/'/g, "&#39;")})'>+ Thêm vào Lịch</button>
-        `;
-        msgArea.appendChild(suggestionDiv);
-        msgArea.scrollTop = msgArea.scrollHeight;
-      }
-    } catch (err) {
-      loadingBubble.innerText = 'Lỗi kết nối: ' + err.message;
-    }
+    sendAiMessage(userMsg);
   });
+}
+
+/**
+ * Gửi tin nhắn cho trợ lý AI (từ ô chat hoặc từ các nút: check-in, gián đoạn, chia nhỏ mục tiêu...).
+ * intent: daily_adjust | disruption | goal_breakdown | allocate_free_time | behind_schedule
+ */
+let aiBusy = false;
+async function sendAiMessage(userMsg, { intent = null } = {}) {
+  const drawer = document.getElementById('aiChatDrawer');
+  const msgArea = document.getElementById('aiChatMessages');
+  drawer.classList.add('active');
+  if (aiBusy) {
+    showToast(L('Trợ lý đang trả lời tin trước, chờ chút nhé.', 'The assistant is still replying.'), 'error');
+    return;
+  }
+  aiBusy = true;
+  appendChatBubble('user', userMsg);
+  const loadingBubble = appendChatBubble('assistant', L('LifeCare AI đang suy nghĩ...', 'LifeCare AI is reflecting...'));
+
+  try {
+    const res = await apiRequest('/api/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: userMsg, mode: AppState.aiMode, language: AppState.language, intent })
+    });
+
+    loadingBubble.remove();
+    appendChatBubble('assistant', res.reply);
+
+    // Trợ lý AI đã tự thay đổi dữ liệu: báo và tải lại màn hình đang mở.
+    const c = res.tasksChanged;
+    if (c && Object.values(c).some(Boolean)) {
+      const parts = [];
+      if (c.added) parts.push(L(`thêm ${c.added} việc`, `${c.added} added`));
+      if (c.updated) parts.push(L(`sửa ${c.updated} việc`, `${c.updated} updated`));
+      if (c.deleted) parts.push(L(`xoá ${c.deleted} việc`, `${c.deleted} deleted`));
+      if (c.goals) parts.push(L('cập nhật mục tiêu', 'goals updated'));
+      if (c.progress) parts.push(L('ghi tiến độ', 'progress logged'));
+      if (c.disruptions) parts.push(L('ghi gián đoạn', 'disruption saved'));
+      showToast(L('Đã cập nhật: ', 'Updated: ') + parts.join(', '));
+      refreshActiveView();
+      refreshReminderTasks();
+    }
+
+    if (res.suggestedTasks && res.suggestedTasks.length > 0) {
+      const suggestionDiv = document.createElement('div');
+      suggestionDiv.style.padding = '8px 12px';
+      suggestionDiv.style.fontSize = '0.8rem';
+      suggestionDiv.style.background = 'var(--primary-light)';
+      suggestionDiv.style.borderRadius = 'var(--radius-sm)';
+      suggestionDiv.style.marginTop = '6px';
+      suggestionDiv.innerHTML = `
+        <strong>${t('addAiTaskBtn')}:</strong> "${escapeHTML(res.suggestedTasks[0].title)}"
+        <br/><button class="btn btn-primary" style="font-size: 0.72rem; padding: 4px 8px; margin-top: 4px;">+ Thêm vào Lịch</button>
+      `;
+      suggestionDiv.querySelector('button').addEventListener('click', () => addAiSuggestedTask(res.suggestedTasks[0]));
+      msgArea.appendChild(suggestionDiv);
+      msgArea.scrollTop = msgArea.scrollHeight;
+    }
+  } catch (err) {
+    loadingBubble.innerText = L('Lỗi kết nối: ', 'Connection error: ') + err.message;
+  } finally {
+    aiBusy = false;
+  }
+}
+
+/** Tải lại màn hình đang mở sau khi dữ liệu thay đổi. */
+function refreshActiveView() {
+  const v = AppState.activeView;
+  if (v === 'dashboard') loadDashboard();
+  else if (v === 'planner') loadPlanner();
+  else if (v === 'routine') loadRoutine();
+  else if (v === 'goals') loadGoals();
 }
 
 function appendChatBubble(role, text) {
   const msgArea = document.getElementById('aiChatMessages');
   const bubble = document.createElement('div');
   bubble.className = `chat-msg ${role}`;
-  bubble.innerHTML = text.replace(/\n/g, '<br/>');
+  // Chữ thuần: chặn mọi HTML, chỉ đổi **đậm** và xuống dòng.
+  const safe = String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  bubble.innerHTML = safe.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>');
   msgArea.appendChild(bubble);
   msgArea.scrollTop = msgArea.scrollHeight;
   return bubble;
@@ -1471,7 +1482,7 @@ window.addAiSuggestedTask = async function(task) {
         description: task.description || 'Generated by LifeCare AI',
         category: task.category || 'Rest',
         priority: task.priority || 'medium',
-        date: new Date().toISOString().split('T')[0],
+        date: todayLocal(),
         start_time: '14:30',
         end_time: '14:45'
       })
@@ -1552,9 +1563,12 @@ function bindSettings() {
           quiet_hours_start,
           quiet_hours_end,
           notification_frequency,
-          language
+          language,
+          remind_repeat_minutes: Number(document.getElementById('setRemindRepeat').value),
+          remind_overdue: document.getElementById('setRemindOverdue').checked
         })
       });
+      loadReminderSettings();
 
       applyLanguage(language);
       showToast(AppState.language === 'vi' ? 'Đã lưu tùy chọn thói quen.' : 'Preferences saved.');
@@ -1641,8 +1655,12 @@ async function loadSettings() {
       if (s.quiet_hours_end) document.getElementById('setQuietEnd').value = s.quiet_hours_end;
       if (s.notification_frequency) document.getElementById('setFrequency').value = s.notification_frequency;
       if (s.language) document.getElementById('setLanguage').value = s.language;
+      if (s.remind_repeat_minutes) document.getElementById('setRemindRepeat').value = String(s.remind_repeat_minutes);
+      document.getElementById('setRemindOverdue').checked = s.remind_overdue !== 0;
     }
   } catch (e) {}
+  loadPsychForm(); // planning-ui.js
+  updateNotifPermissionText();
 }
 
 // Utility: XSS prevention

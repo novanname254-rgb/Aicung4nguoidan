@@ -214,10 +214,10 @@ function analyzeScheduleBalance(tasks = [], lang = 'vi') {
   } else {
     if (lang === 'vi') {
       recommendations.push('✅ Lịch trình hôm nay phân bổ khá hợp lý.');
-      recommendations.push('💧 Đừng quên uống đủ 2.0 - 2.5 lít nước trong ngày.');
+      recommendations.push('💧 Đừng quên uống đủ 2000 - 2500 ml nước trong ngày.');
     } else {
       recommendations.push('✅ Today\'s schedule appears balanced.');
-      recommendations.push('💧 Remember to drink at least 2.0 - 2.5 Liters of fresh water today.');
+      recommendations.push('💧 Remember to drink at least 2000 - 2500 ml of fresh water today.');
     }
   }
 
@@ -399,6 +399,7 @@ function queryGeminiAPI(userPrompt, context) {
 }
 
 module.exports = {
+  checkCrisisOrEmergency,
   generateAIWellnessReply,
   analyzeScheduleBalance,
   detectScheduleOverlaps,

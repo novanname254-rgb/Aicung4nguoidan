@@ -4,9 +4,11 @@ const path = require('node:path');
 const url = require('node:url');
 const crypto = require('node:crypto');
 
-const { getDb, initDatabase, isTursoConfigured, hashPassword, verifyPassword } = require('./server/db');
+const { getDb, initDatabase, hashPassword, verifyPassword } = require('./server/db');
+const P = require('./server/planning');
 const { ensureDemoUser, getDefaultUser, createSession, getUserFromSession, deleteSession } = require('./server/auth');
-const { generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
+const { checkCrisisOrEmergency, generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
+const { generateLLMReply, isLLMConfigured } = require('./server/llm-assistant');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -32,7 +34,7 @@ function sendJSON(res, statusCode, data, headers = {}) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Timezone',
     ...headers
   });
   res.end(JSON.stringify(data));
@@ -78,28 +80,73 @@ async function getAuthUser(req) {
   return await getDefaultUser();
 }
 
-// Main HTTP request router
-let _serverInitialized = false;
+// Múi giờ của người dùng: trình duyệt gửi header X-Timezone (VD Asia/Ho_Chi_Minh).
+function getRequestTz(req) {
+  return P.validTimezone(req.headers['x-timezone']) || P.DEFAULT_TZ;
+}
+
+const intOrNull = (v, min, max) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= min && n <= max ? n : NaN;
+};
+
+/**
+ * Bọc router: với /api, đồng bộ dữ liệu từ Google Sheet trước khi xử lý, giữ lại phản hồi cho tới khi
+ * thay đổi đã được ghi (mã hoá) ra Google Sheet / JSON, rồi mới gửi cho trình duyệt.
+ */
 async function handleRequest(req, res) {
-  if (!_serverInitialized) {
-    try {
-      await initDatabase();
-      await ensureDemoUser();
-      _serverInitialized = true;
-    } catch (e) {
-      console.warn('[LifeCare Server] DB init note:', e.message);
-    }
+  const isApi = (req.url || '').startsWith('/api/') && req.method !== 'OPTIONS';
+  if (!isApi) return routeRequest(req, res);
+
+  try {
+    await ensureServerInit();
+    await getDb().syncFromStore({ force: req.method !== 'GET' });
+  } catch (err) {
+    console.error('[LifeCare Server] Storage error:', err.message);
+    return sendJSON(res, 503, { success: false, message: 'Không kết nối được nơi lưu dữ liệu: ' + err.message });
   }
+
+  let pending = null;
+  const realRes = res;
+  const proxy = Object.create(res);
+  proxy.writeHead = (...args) => { pending = pending || {}; pending.head = args; return proxy; };
+  proxy.setHeader = (...args) => realRes.setHeader(...args);
+  proxy.end = (...args) => { pending = pending || {}; pending.body = args; return proxy; };
+
+  await routeRequest(req, proxy);
+
+  try {
+    if (getDb().isDirty()) await getDb().persist();
+  } catch (err) {
+    console.error('[LifeCare Server] Persist failed:', err.message);
+    return sendJSON(realRes, 503, { success: false, message: 'Đã xử lý nhưng chưa lưu được dữ liệu: ' + err.message + '. Thử lại nhé.' });
+  }
+  if (pending && pending.head) realRes.writeHead(...pending.head);
+  realRes.end(...((pending && pending.body) || []));
+}
+
+let _serverInitialized = false;
+async function ensureServerInit() {
+  if (_serverInitialized) return;
+  await initDatabase();
+  await ensureDemoUser();
+  if (getDb().isDirty()) await getDb().persist();
+  _serverInitialized = true;
+}
+
+async function routeRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
+  const tz = getRequestTz(req);
 
   // Handle CORS Preflight
   if (method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Timezone',
       'Access-Control-Max-Age': '86400'
     });
     return res.end();
@@ -159,7 +206,7 @@ async function handleRequest(req, res) {
         `).run('set_' + crypto.randomUUID(), userId, now);
 
         const { token } = await createSession(userId);
-        const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at FROM users WHERE id = ?').get(userId);
+        const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at FROM users WHERE id = ?').get(userId);
 
         return sendJSON(res, 201, {
           success: true,
@@ -274,6 +321,21 @@ async function handleRequest(req, res) {
         const { full_name, dob, gender, personal_goals, avatar } = body;
         const now = new Date().toISOString();
 
+        // Tâm lý & ý chí nền cố định (AI dùng làm mốc so sánh với check-in hằng ngày).
+        let psych = null;
+        if (body.psych_profile && typeof body.psych_profile === 'object') {
+          const pp = body.psych_profile;
+          const lvl = v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null; };
+          psych = JSON.stringify({
+            willpower: lvl(pp.willpower),
+            stress_tolerance: lvl(pp.stress_tolerance),
+            motivation_source: String(pp.motivation_source || '').slice(0, 100) || null,
+            best_focus_time: ['morning', 'afternoon', 'evening', 'night'].includes(pp.best_focus_time) ? pp.best_focus_time : null,
+            max_focus_minutes: (Number(pp.max_focus_minutes) >= 10 && Number(pp.max_focus_minutes) <= 240) ? Math.round(Number(pp.max_focus_minutes)) : null,
+            notes: String(pp.notes || '').slice(0, 500) || null
+          });
+        }
+
         await db.prepare(`
           UPDATE users
           SET full_name = COALESCE(?, full_name),
@@ -281,11 +343,12 @@ async function handleRequest(req, res) {
               gender = COALESCE(?, gender),
               personal_goals = COALESCE(?, personal_goals),
               avatar = COALESCE(?, avatar),
+              psych_profile = COALESCE(?, psych_profile),
               updated_at = ?
           WHERE id = ?
-        `).run(full_name, dob, gender, personal_goals, avatar, now, user.id);
+        `).run(full_name, dob, gender, personal_goals, avatar, psych, now, user.id);
 
-        const updated = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at FROM users WHERE id = ?').get(user.id);
+        const updated = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at FROM users WHERE id = ?').get(user.id);
         return sendJSON(res, 200, { success: true, message: 'Profile updated successfully.', user: updated });
       }
 
@@ -342,6 +405,8 @@ async function handleRequest(req, res) {
                 remind_mood = COALESCE(?, remind_mood),
                 remind_tasks = COALESCE(?, remind_tasks),
                 notification_frequency = COALESCE(?, notification_frequency),
+                remind_repeat_minutes = COALESCE(?, remind_repeat_minutes),
+                remind_overdue = COALESCE(?, remind_overdue),
                 updated_at = ?
             WHERE user_id = ?
           `).run(
@@ -352,6 +417,8 @@ async function handleRequest(req, res) {
             body.remind_mood !== undefined ? (body.remind_mood ? 1 : 0) : null,
             body.remind_tasks !== undefined ? (body.remind_tasks ? 1 : 0) : null,
             body.notification_frequency,
+            [5, 10, 15, 20, 30, 45, 60].includes(Number(body.remind_repeat_minutes)) ? Number(body.remind_repeat_minutes) : null,
+            body.remind_overdue !== undefined ? (body.remind_overdue ? 1 : 0) : null,
             now,
             user.id
           );
@@ -368,7 +435,7 @@ async function handleRequest(req, res) {
         const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const todayStr = (parsedUrl.query.date || new Date().toISOString().split('T')[0]);
+        const todayStr = (P.isRealDate(parsedUrl.query.date) ? parsedUrl.query.date : P.localNow(tz).date);
 
         // Tasks for today
         const todayTasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date = ? ORDER BY start_time ASC').all(user.id, todayStr);
@@ -490,6 +557,10 @@ async function handleRequest(req, res) {
         if (!title || !category || !date) {
           return sendJSON(res, 400, { success: false, message: 'Title, category, and date are required.' });
         }
+        const duration_minutes = intOrNull(body.duration_minutes, 1, 1440);
+        if (Number.isNaN(duration_minutes)) return sendJSON(res, 400, { success: false, message: 'Thời lượng phải từ 1 đến 1440 phút.' });
+        const deadline = P.isRealDate(body.deadline) ? body.deadline : null;
+        const goal_id = body.goal_id && (await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?').get(body.goal_id, user.id)) ? body.goal_id : null;
 
         // Detect overlapping schedule with existing tasks on same date
         let overlapWarning = null;
@@ -507,8 +578,8 @@ async function handleRequest(req, res) {
         const now = new Date().toISOString();
 
         await db.prepare(`
-          INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, recurring, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+          INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, recurring, goal_id, duration_minutes, deadline, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           taskId,
           user.id,
@@ -522,6 +593,9 @@ async function handleRequest(req, res) {
           is_event ? 1 : 0,
           reminder_time || null,
           recurring || 'none',
+          goal_id,
+          duration_minutes,
+          deadline,
           now,
           now
         );
@@ -547,10 +621,19 @@ async function handleRequest(req, res) {
         const body = await parseBody(req);
         const now = new Date().toISOString();
 
-        const existing = await db.prepare('SELECT id FROM tasks WHERE id = ? AND user_id = ?').get(taskId, user.id);
+        const existing = await db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(taskId, user.id);
         if (!existing) {
           return sendJSON(res, 404, { success: false, message: 'Task not found or unauthorized.' });
         }
+        const duration_minutes = intOrNull(body.duration_minutes, 1, 1440);
+        if (Number.isNaN(duration_minutes)) return sendJSON(res, 400, { success: false, message: 'Thời lượng phải từ 1 đến 1440 phút.' });
+        // goal_id: "" = bỏ liên kết, undefined = giữ nguyên
+        let goalId = existing.goal_id;
+        if (body.goal_id !== undefined) {
+          goalId = body.goal_id && (await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?').get(body.goal_id, user.id)) ? body.goal_id : null;
+        }
+        let deadline = existing.deadline;
+        if (body.deadline !== undefined) deadline = P.isRealDate(body.deadline) ? body.deadline : null;
 
         await db.prepare(`
           UPDATE tasks
@@ -565,6 +648,9 @@ async function handleRequest(req, res) {
               is_event = COALESCE(?, is_event),
               reminder_time = COALESCE(?, reminder_time),
               recurring = COALESCE(?, recurring),
+              duration_minutes = COALESCE(?, duration_minutes),
+              goal_id = ?,
+              deadline = ?,
               updated_at = ?
           WHERE id = ? AND user_id = ?
         `).run(
@@ -573,12 +659,19 @@ async function handleRequest(req, res) {
           body.is_event !== undefined ? (body.is_event ? 1 : 0) : null,
           body.reminder_time,
           body.recurring,
+          duration_minutes,
+          goalId,
+          deadline,
           now,
           taskId,
           user.id
         );
 
         const updated = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+        // Đánh dấu xong / bỏ đánh dấu: ghi lại tiến độ (để tính % mục tiêu và dự báo).
+        if (updated.status !== existing.status || updated.goal_id !== existing.goal_id) {
+          await P.syncTaskProgress(db, user.id, updated, tz);
+        }
         return sendJSON(res, 200, { success: true, message: 'Task updated successfully.', task: updated });
       }
 
@@ -592,6 +685,7 @@ async function handleRequest(req, res) {
         if (resDelete.changes === 0) {
           return sendJSON(res, 404, { success: false, message: 'Task not found or unauthorized.' });
         }
+        await db.prepare("DELETE FROM progress_logs WHERE user_id = ? AND task_id = ? AND kind = 'task_done'").run(user.id, taskId);
 
         return sendJSON(res, 200, { success: true, message: 'Task deleted successfully.' });
       }
@@ -616,7 +710,7 @@ async function handleRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
-        let { checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_intake, discomfort, notes } = body;
+        let { checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_ml, discomfort, notes } = body;
 
         // Numerical input validation
         if (sleep_duration !== undefined && sleep_duration !== null && sleep_duration !== '') {
@@ -628,13 +722,13 @@ async function handleRequest(req, res) {
           sleep_duration = null;
         }
 
-        if (water_intake !== undefined && water_intake !== null && water_intake !== '') {
-          water_intake = parseFloat(water_intake);
-          if (isNaN(water_intake) || water_intake < 0 || water_intake > 20) {
-            return sendJSON(res, 400, { success: false, message: 'Water intake must be a valid number between 0 and 20 liters.' });
+        if (water_ml !== undefined && water_ml !== null && water_ml !== '') {
+          water_ml = Math.round(Number(water_ml));
+          if (isNaN(water_ml) || water_ml < 0 || water_ml > 10000) {
+            return sendJSON(res, 400, { success: false, message: 'Lượng nước phải từ 0 đến 10000 ml.' });
           }
         } else {
-          water_intake = null;
+          water_ml = null;
         }
 
         if (energy_level !== undefined && energy_level !== null && energy_level !== '') {
@@ -655,7 +749,7 @@ async function handleRequest(req, res) {
           exercise_duration = 0;
         }
 
-        const date = checkin_date || new Date().toISOString().split('T')[0];
+        const date = P.isRealDate(checkin_date) ? checkin_date : P.localNow(tz).date;
         const existing = await db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
 
         let id = existing ? existing.id : ('hlth_' + crypto.randomUUID());
@@ -664,7 +758,7 @@ async function handleRequest(req, res) {
         if (existing) {
           await db.prepare(`
             UPDATE health_checkins
-            SET sleep_duration = ?, sleep_quality = ?, physical_condition = ?, energy_level = ?, exercise_status = ?, exercise_type = ?, exercise_duration = ?, meals_summary = ?, water_intake = ?, discomfort = ?, notes = ?
+            SET sleep_duration = ?, sleep_quality = ?, physical_condition = ?, energy_level = ?, exercise_status = ?, exercise_type = ?, exercise_duration = ?, meals_summary = ?, water_ml = ?, discomfort = ?, notes = ?
             WHERE id = ? AND user_id = ?
           `).run(
             sleep_duration,
@@ -675,7 +769,7 @@ async function handleRequest(req, res) {
             exercise_type || null,
             exercise_duration,
             meals_summary || null,
-            water_intake,
+            water_ml,
             discomfort || null,
             notes || null,
             id,
@@ -683,7 +777,7 @@ async function handleRequest(req, res) {
           );
         } else {
           await db.prepare(`
-            INSERT INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_intake, discomfort, notes, created_at)
+            INSERT INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, exercise_type, exercise_duration, meals_summary, water_ml, discomfort, notes, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             id,
@@ -697,7 +791,7 @@ async function handleRequest(req, res) {
             exercise_type || null,
             exercise_duration,
             meals_summary || null,
-            water_intake,
+            water_ml,
             discomfort || null,
             notes || null,
             now
@@ -740,7 +834,7 @@ async function handleRequest(req, res) {
           return sendJSON(res, 400, { success: false, message: 'Mood selection is required.' });
         }
 
-        const date = checkin_date || new Date().toISOString().split('T')[0];
+        const date = P.isRealDate(checkin_date) ? checkin_date : P.localNow(tz).date;
         const existing = await db.prepare('SELECT id FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, date);
 
         let id = existing ? existing.id : ('mood_' + crypto.randomUUID());
@@ -789,7 +883,7 @@ async function handleRequest(req, res) {
         const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = P.localNow(tz).date;
         const health = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
         const mood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
 
@@ -810,26 +904,25 @@ async function handleRequest(req, res) {
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
 
         const body = await parseBody(req);
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = P.localNow(tz).date;
         const now = new Date().toISOString();
 
         // 1. Health part
-        if (body.physical_condition || body.sleep_duration !== undefined || body.water_intake !== undefined) {
+        if (body.physical_condition || body.sleep_duration !== undefined || body.energy_level !== undefined) {
           const existingHealth = await db.prepare('SELECT id FROM health_checkins WHERE user_id = ? AND checkin_date = ?').get(user.id, todayStr);
           if (existingHealth) {
             await db.prepare(`
               UPDATE health_checkins
               SET physical_condition = COALESCE(?, physical_condition),
                   sleep_duration = COALESCE(?, sleep_duration),
-                  water_intake = COALESCE(?, water_intake),
                   energy_level = COALESCE(?, energy_level)
               WHERE id = ?
-            `).run(body.physical_condition || null, body.sleep_duration || null, body.water_intake || null, body.energy_level || null, existingHealth.id);
+            `).run(body.physical_condition || null, body.sleep_duration || null, body.energy_level || null, existingHealth.id);
           } else {
             await db.prepare(`
-              INSERT INTO health_checkins (id, user_id, checkin_date, physical_condition, sleep_duration, water_intake, energy_level, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `).run('hlth_' + crypto.randomUUID(), user.id, todayStr, body.physical_condition || 'Good', body.sleep_duration || 7, body.water_intake || 2, body.energy_level || 4, now);
+              INSERT INTO health_checkins (id, user_id, checkin_date, physical_condition, sleep_duration, energy_level, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run('hlth_' + crypto.randomUUID(), user.id, todayStr, body.physical_condition || 'Good', body.sleep_duration || null, body.energy_level || null, now);
           }
         }
 
@@ -839,14 +932,14 @@ async function handleRequest(req, res) {
           if (existingMood) {
             await db.prepare(`
               UPDATE mood_checkins
-              SET mood = ?, emoji = COALESCE(?, emoji), stress_level = COALESCE(?, stress_level)
+              SET mood = ?, emoji = COALESCE(?, emoji), stress_level = COALESCE(?, stress_level), motivation_level = COALESCE(?, motivation_level)
               WHERE id = ?
-            `).run(body.mood, body.emoji || null, body.stress_level || null, existingMood.id);
+            `).run(body.mood, body.emoji || null, body.stress_level || null, body.motivation_level || null, existingMood.id);
           } else {
             await db.prepare(`
-              INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `).run('mood_' + crypto.randomUUID(), user.id, todayStr, body.mood, body.emoji || '🙂', body.stress_level || 2, now);
+              INSERT INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, motivation_level, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `).run('mood_' + crypto.randomUUID(), user.id, todayStr, body.mood, body.emoji || '🙂', body.stress_level || 2, body.motivation_level || null, now);
           }
         }
 
@@ -875,6 +968,8 @@ async function handleRequest(req, res) {
         const userMessage = body.message || '';
         const mode = body.mode || 'general'; // 'general', 'schedule', 'wellness', 'insight'
         const language = body.language || 'vi';
+        // Tình huống có sẵn: daily_adjust, disruption, goal_breakdown, allocate_free_time, behind_schedule
+        const intent = typeof body.intent === 'string' ? body.intent : null;
 
         if (!userMessage.trim()) {
           return sendJSON(res, 400, { success: false, message: 'Message is required.' });
@@ -886,23 +981,35 @@ async function handleRequest(req, res) {
           userChatId, user.id, 'user', userMessage, now
         );
 
-        // Fetch user context for tailored wellness insights (strictly authorized data only)
-        const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
-        const recentMood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
-        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 30').all(user.id);
+        // Khủng hoảng / tự hại: luôn trả lời ngay bằng thông tin hỗ trợ khẩn cấp, không qua LLM.
+        let aiResult = checkCrisisOrEmergency(userMessage.toLowerCase());
+        if (aiResult && !aiResult.isCrisis && isLLMConfigured()) aiResult = null; // câu hỏi y tế: để LLM trả lời có giới hạn
 
-        const aiResult = await generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks, mode, language });
+        if (!aiResult && isLLMConfigured()) {
+          // Trợ lý LLM (Groq): đọc dữ liệu của người dùng và tự thêm / sửa / xoá việc trong lịch.
+          aiResult = await generateLLMReply(db, user, userMessage, { mode, language, intent, tz });
+        } else if (!aiResult) {
+          // Chưa cấu hình GROQ_API_KEY: dùng bộ luật cũ.
+          const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+          const recentMood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
+          const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY date DESC LIMIT 30').all(user.id);
+          aiResult = await generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks, mode, language });
+        }
 
-        const aiChatId = 'chat_' + crypto.randomUUID();
-        await db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
-          aiChatId, user.id, 'assistant', aiResult.reply, new Date().toISOString()
-        );
+        // Thông báo lỗi không lưu vào lịch sử, để lượt sau model không đọc nhầm nó là câu trả lời.
+        if (aiResult.type !== 'error') {
+          const aiChatId = 'chat_' + crypto.randomUUID();
+          await db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
+            aiChatId, user.id, 'assistant', aiResult.reply, new Date().toISOString()
+          );
+        }
 
         return sendJSON(res, 200, {
           success: true,
           reply: aiResult.reply,
           type: aiResult.type,
-          suggestedTasks: aiResult.suggestedTasks || []
+          suggestedTasks: aiResult.suggestedTasks || [],
+          tasksChanged: aiResult.tasksChanged || null
         });
       }
 
@@ -997,7 +1104,7 @@ async function handleRequest(req, res) {
         let taskQuery = 'SELECT category, priority, status, date FROM tasks WHERE user_id = ?';
         const taskParams = [user.id];
 
-        let healthQuery = 'SELECT checkin_date, sleep_duration, water_intake, energy_level, physical_condition, exercise_status, exercise_duration FROM health_checkins WHERE user_id = ?';
+        let healthQuery = 'SELECT checkin_date, sleep_duration, water_ml, energy_level, physical_condition, exercise_status, exercise_duration FROM health_checkins WHERE user_id = ?';
         const healthParams = [user.id];
 
         let moodQuery = 'SELECT checkin_date, mood, stress_level, motivation_level, relaxed_score, anxiety_score FROM mood_checkins WHERE user_id = ?';
@@ -1100,6 +1207,10 @@ async function handleRequest(req, res) {
         const health = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ?').all(user.id);
         const mood = await db.prepare('SELECT * FROM mood_checkins WHERE user_id = ?').all(user.id);
         const settings = await db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(user.id);
+        const goals = await db.prepare('SELECT * FROM goals WHERE user_id = ?').all(user.id);
+        const progressLogs = await db.prepare('SELECT * FROM progress_logs WHERE user_id = ?').all(user.id);
+        const routineBlocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(user.id);
+        const disruptions = await db.prepare('SELECT * FROM disruptions WHERE user_id = ?').all(user.id);
 
         const exportPayload = {
           lifecare_export_version: '1.0',
@@ -1113,7 +1224,12 @@ async function handleRequest(req, res) {
             personal_goals: user.personal_goals
           },
           settings,
+          psych_profile: user.psych_profile ? JSON.parse(user.psych_profile) : null,
           tasks,
+          goals,
+          progress_logs: progressLogs,
+          routine_blocks: routineBlocks,
+          disruptions,
           health_checkins: health,
           mood_checkins: mood
         };
@@ -1143,6 +1259,256 @@ async function handleRequest(req, res) {
 
         await db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
         return sendJSON(res, 200, { success: true, message: 'Your account and all associated data have been permanently removed.' });
+      }
+
+      // ----------------------------------------
+      // 10. THỜI GIAN BIỂU CỐ ĐỊNH (TIME BLOCKS) – thiết lập một lần, tự lặp theo tuần
+      // ----------------------------------------
+      if (pathname === '/api/routine' || pathname.startsWith('/api/routine/')) {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        const now = new Date().toISOString();
+
+        const validateBlock = (b, partial) => {
+          const out = {};
+          if (b.block_type !== undefined || !partial) {
+            if (!P.BLOCK_TYPES.includes(b.block_type)) return [null, 'Loại khung giờ không hợp lệ.'];
+            out.block_type = b.block_type;
+          }
+          if (b.label !== undefined) out.label = String(b.label || '').trim().slice(0, 80) || null;
+          for (const k of ['start_time', 'end_time']) {
+            if (b[k] !== undefined || !partial) {
+              if (!P.isTime(b[k])) return [null, 'Giờ phải có dạng HH:MM.'];
+              out[k] = b[k];
+            }
+          }
+          if (out.start_time && out.end_time && out.start_time === out.end_time) return [null, 'Giờ bắt đầu và kết thúc không được trùng nhau.'];
+          if (b.days !== undefined || !partial) {
+            const days = P.parseDays(b.days);
+            if (!days.length) return [null, 'Chọn ít nhất một ngày trong tuần.'];
+            out.days = days.join(',');
+          }
+          return [out, null];
+        };
+
+        if (pathname === '/api/routine' && method === 'GET') {
+          const blocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ? ORDER BY start_time').all(user.id);
+          return sendJSON(res, 200, { success: true, blocks, blockTypes: P.BLOCK_TYPES, blockLabels: P.BLOCK_LABELS, templates: Object.keys(P.ROUTINE_TEMPLATES) });
+        }
+
+        if (pathname === '/api/routine' && method === 'POST') {
+          const body = await parseBody(req);
+          const [b, problem] = validateBlock(body, false);
+          if (problem) return sendJSON(res, 400, { success: false, message: problem });
+          const id = 'blk_' + crypto.randomUUID();
+          await db.prepare(`INSERT INTO routine_blocks (id, user_id, block_type, label, start_time, end_time, days, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, b.block_type, b.label || P.BLOCK_LABELS[b.block_type], b.start_time, b.end_time, b.days, now, now);
+          return sendJSON(res, 201, { success: true, block: await db.prepare('SELECT * FROM routine_blocks WHERE id = ?').get(id) });
+        }
+
+        // POST /api/routine/template – áp dụng mẫu thời gian biểu cho cả tuần hoặc các ngày được chọn
+        if (pathname === '/api/routine/template' && method === 'POST') {
+          const body = await parseBody(req);
+          const template = P.ROUTINE_TEMPLATES[body.template];
+          if (!template) return sendJSON(res, 400, { success: false, message: 'Mẫu không tồn tại.' });
+          const onlyDays = body.days ? P.parseDays(body.days) : null;
+          if (body.replace) await db.prepare('DELETE FROM routine_blocks WHERE user_id = ?').run(user.id);
+          let created = 0;
+          for (const b of template) {
+            const days = onlyDays ? b.days.filter(d => onlyDays.includes(d)) : b.days;
+            if (!days.length) continue;
+            await db.prepare(`INSERT INTO routine_blocks (id, user_id, block_type, label, start_time, end_time, days, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('blk_' + crypto.randomUUID(), user.id, b.block_type, b.label, b.start_time, b.end_time, days.join(','), now, now);
+            created++;
+          }
+          return sendJSON(res, 200, { success: true, created });
+        }
+
+        const blockId = pathname.split('/')[3];
+        if (blockId && method === 'PUT') {
+          const body = await parseBody(req);
+          const [b, problem] = validateBlock(body, true);
+          if (problem) return sendJSON(res, 400, { success: false, message: problem });
+          const keys = Object.keys(b);
+          if (!keys.length) return sendJSON(res, 400, { success: false, message: 'Không có gì để cập nhật.' });
+          const r = await db.prepare(`UPDATE routine_blocks SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ? AND user_id = ?`)
+            .run(...keys.map(k => b[k]), now, blockId, user.id);
+          if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy khung giờ.' });
+          return sendJSON(res, 200, { success: true, block: await db.prepare('SELECT * FROM routine_blocks WHERE id = ?').get(blockId) });
+        }
+        if (blockId && method === 'DELETE') {
+          const r = await db.prepare('DELETE FROM routine_blocks WHERE id = ? AND user_id = ?').run(blockId, user.id);
+          if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy khung giờ.' });
+          return sendJSON(res, 200, { success: true });
+        }
+      }
+
+      // GET /api/schedule?start=YYYY-MM-DD&end=YYYY-MM-DD – lịch theo ngày: khung giờ cố định + công việc + gián đoạn + giờ trống
+      if (pathname === '/api/schedule' && method === 'GET') {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        const today = P.localNow(tz).date;
+        const start = P.isRealDate(parsedUrl.query.start) ? parsedUrl.query.start : today;
+        let end = P.isRealDate(parsedUrl.query.end) ? parsedUrl.query.end : start;
+        if (end < start) end = start;
+        if (P.daysBetween(start, end) > 41) end = P.addDays(start, 41);
+
+        const blocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(user.id);
+        const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY start_time').all(user.id, start, end);
+        const disruptions = await db.prepare('SELECT * FROM disruptions WHERE user_id = ? AND date >= ? AND date <= ?').all(user.id, start, end);
+        const free = await P.findFreeSlots(db, user.id, start, end, { minMinutes: 30, tz });
+        const days = [];
+        for (let d = start; d <= end; d = P.addDays(d, 1)) {
+          days.push({
+            date: d,
+            weekday: P.dayKey(d),
+            blocks: P.blocksForDate(blocks, d).map(b => ({ id: b.id, block_type: b.block_type, label: b.label, start: P.toHM(b.start), end: b.end === 1440 ? '24:00' : P.toHM(b.end) })),
+            tasks: tasks.filter(t => t.date === d),
+            disruptions: disruptions.filter(x => x.date === d),
+            free_slots: free.filter(f => f.date === d)
+          });
+        }
+        return sendJSON(res, 200, { success: true, today, timezone: tz, days });
+      }
+
+      // ----------------------------------------
+      // 11. MỤC TIÊU, TIẾN ĐỘ, CỘT MỐC & DỰ BÁO
+      // ----------------------------------------
+      if (pathname === '/api/goals' || pathname.startsWith('/api/goals/')) {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        const now = new Date().toISOString();
+        const parts = pathname.split('/'); // ['', 'api', 'goals', id, 'progress']
+        const goalId = parts[3];
+
+        const readGoal = body => {
+          const g = {};
+          if (body.title !== undefined) {
+            if (!String(body.title || '').trim()) return [null, 'Tên mục tiêu không được để trống.'];
+            g.title = String(body.title).trim().slice(0, 200);
+          }
+          if (body.description !== undefined) g.description = String(body.description || '').slice(0, 2000);
+          if (body.deadline !== undefined) {
+            if (body.deadline && !P.isRealDate(body.deadline)) return [null, 'Hạn chót không hợp lệ.'];
+            g.deadline = body.deadline || null;
+          }
+          if (body.estimated_minutes !== undefined) {
+            const m = intOrNull(body.estimated_minutes, 1, 100000);
+            if (Number.isNaN(m)) return [null, 'Thời lượng dự kiến không hợp lệ.'];
+            g.estimated_minutes = m;
+          }
+          if (body.priority !== undefined) {
+            if (!['low', 'medium', 'high'].includes(body.priority)) return [null, 'Mức ưu tiên không hợp lệ.'];
+            g.priority = body.priority;
+          }
+          if (body.status !== undefined) {
+            if (!['active', 'paused', 'done'].includes(body.status)) return [null, 'Trạng thái không hợp lệ.'];
+            g.status = body.status;
+          }
+          return [g, null];
+        };
+
+        if (pathname === '/api/goals' && method === 'GET') {
+          const goals = await P.goalsWithProgress(db, user.id, tz);
+          const logs = await db.prepare('SELECT * FROM progress_logs WHERE user_id = ? ORDER BY log_date DESC, created_at DESC LIMIT 40').all(user.id);
+          return sendJSON(res, 200, { success: true, today: P.localNow(tz).date, goals, recentLogs: logs });
+        }
+
+        if (pathname === '/api/goals' && method === 'POST') {
+          const body = await parseBody(req);
+          const [g, problem] = readGoal(body);
+          if (problem || !g.title) return sendJSON(res, 400, { success: false, message: problem || 'Tên mục tiêu không được để trống.' });
+          const id = 'goal_' + crypto.randomUUID();
+          await db.prepare(`INSERT INTO goals (id, user_id, title, description, deadline, estimated_minutes, priority, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`)
+            .run(id, user.id, g.title, g.description || '', g.deadline || null, g.estimated_minutes || null, g.priority || 'medium', now, now);
+          const goal = await db.prepare('SELECT * FROM goals WHERE id = ?').get(id);
+          return sendJSON(res, 201, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz) } });
+        }
+
+        // POST /api/goals/:id/progress – ghi lại việc học/làm thêm ngoài kế hoạch
+        if (goalId && parts[4] === 'progress' && method === 'POST') {
+          const goal = await db.prepare('SELECT * FROM goals WHERE id = ? AND user_id = ?').get(goalId, user.id);
+          if (!goal) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy mục tiêu.' });
+          const body = await parseBody(req);
+          const minutes = intOrNull(body.minutes, 1, 1440);
+          if (!minutes) return sendJSON(res, 400, { success: false, message: 'Số phút phải từ 1 đến 1440.' });
+          const date = P.isRealDate(body.date) ? body.date : P.localNow(tz).date;
+          await P.addProgressLog(db, user.id, { goal_id: goalId, minutes, note: String(body.note || '').slice(0, 300), log_date: date, kind: 'extra' });
+          return sendJSON(res, 200, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz) } });
+        }
+
+        if (goalId && !parts[4] && method === 'PUT') {
+          const body = await parseBody(req);
+          const [g, problem] = readGoal(body);
+          if (problem) return sendJSON(res, 400, { success: false, message: problem });
+          const keys = Object.keys(g);
+          if (!keys.length) return sendJSON(res, 400, { success: false, message: 'Không có gì để cập nhật.' });
+          const r = await db.prepare(`UPDATE goals SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ? AND user_id = ?`)
+            .run(...keys.map(k => g[k]), now, goalId, user.id);
+          if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy mục tiêu.' });
+          const goal = await db.prepare('SELECT * FROM goals WHERE id = ?').get(goalId);
+          return sendJSON(res, 200, { success: true, goal: { ...goal, progress: await P.goalProgress(db, user.id, goal, tz) } });
+        }
+
+        if (goalId && !parts[4] && method === 'DELETE') {
+          const r = await db.prepare('DELETE FROM goals WHERE id = ? AND user_id = ?').run(goalId, user.id);
+          if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy mục tiêu.' });
+          // Giữ lại các công việc, chỉ bỏ liên kết.
+          await db.prepare('UPDATE tasks SET goal_id = NULL WHERE goal_id = ? AND user_id = ?').run(goalId, user.id);
+          await db.prepare('UPDATE progress_logs SET goal_id = NULL WHERE goal_id = ? AND user_id = ?').run(goalId, user.id);
+          return sendJSON(res, 200, { success: true });
+        }
+      }
+
+      // DELETE /api/progress/:id – xoá một lần ghi tiến độ thêm
+      if (pathname.startsWith('/api/progress/') && method === 'DELETE') {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        const r = await db.prepare("DELETE FROM progress_logs WHERE id = ? AND user_id = ? AND kind = 'extra'").run(pathname.split('/')[3], user.id);
+        if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy bản ghi.' });
+        return sendJSON(res, 200, { success: true });
+      }
+
+      // ----------------------------------------
+      // 12. GIÁN ĐOẠN LỊCH TRÌNH (sự cố, nghỉ học, việc phát sinh, không thể thực hiện)
+      // ----------------------------------------
+      if (pathname === '/api/disruptions' || pathname.startsWith('/api/disruptions/')) {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+
+        if (pathname === '/api/disruptions' && method === 'GET') {
+          const today = P.localNow(tz).date;
+          const start = P.isRealDate(parsedUrl.query.start) ? parsedUrl.query.start : P.addDays(today, -7);
+          const end = P.isRealDate(parsedUrl.query.end) ? parsedUrl.query.end : P.addDays(today, 60);
+          const list = await db.prepare('SELECT * FROM disruptions WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date, start_time').all(user.id, start, end);
+          return sendJSON(res, 200, { success: true, disruptions: list, kinds: P.DISRUPTION_LABELS });
+        }
+
+        if (pathname === '/api/disruptions' && method === 'POST') {
+          const body = await parseBody(req);
+          if (!P.DISRUPTION_KINDS.includes(body.kind)) return sendJSON(res, 400, { success: false, message: 'Loại gián đoạn không hợp lệ.' });
+          if (!P.isRealDate(body.date)) return sendJSON(res, 400, { success: false, message: 'Ngày không hợp lệ.' });
+          const allDay = !body.start_time && !body.end_time;
+          if (!allDay && !(P.isTime(body.start_time) && P.isTime(body.end_time) && body.end_time > body.start_time)) {
+            return sendJSON(res, 400, { success: false, message: 'Nhập đủ giờ bắt đầu và kết thúc (kết thúc sau bắt đầu), hoặc chọn cả ngày.' });
+          }
+          const id = 'dis_' + crypto.randomUUID();
+          await db.prepare('INSERT INTO disruptions (id, user_id, kind, date, start_time, end_time, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(id, user.id, body.kind, body.date, allDay ? null : body.start_time, allDay ? null : body.end_time, String(body.note || '').slice(0, 500), new Date().toISOString());
+          // Các việc chưa xong bị ảnh hưởng
+          const dayTasks = await db.prepare("SELECT * FROM tasks WHERE user_id = ? AND date = ? AND status != 'completed'").all(user.id, body.date);
+          const affected = dayTasks.filter(t => allDay || !t.start_time || !t.end_time || (t.start_time < body.end_time && t.end_time > body.start_time));
+          const disruption = await db.prepare('SELECT * FROM disruptions WHERE id = ?').get(id);
+          return sendJSON(res, 201, { success: true, disruption, affectedTasks: affected });
+        }
+
+        const disId = pathname.split('/')[3];
+        if (disId && method === 'DELETE') {
+          const r = await db.prepare('DELETE FROM disruptions WHERE id = ? AND user_id = ?').run(disId, user.id);
+          if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy gián đoạn.' });
+          return sendJSON(res, 200, { success: true });
+        }
       }
 
       // If no API route matches
@@ -1189,7 +1555,10 @@ async function handleRequest(req, res) {
 
 // Start server if run directly
 if (require.main === module) {
-  ensureDemoUser();
+  // Tạo bảng trước rồi mới seed tài khoản demo (database mới chưa có bảng nào).
+  ensureServerInit()
+    .then(() => console.log(`💾 Lưu trữ: ${getDb().storeInfo()}`))
+    .catch(err => console.error('[LifeCare Server] DB init failed:', err.message));
   const server = http.createServer(handleRequest);
   server.listen(PORT, () => {
     console.log('====================================================');

@@ -12,3 +12,6 @@ data/*.json
 # Vercel deployment cache
 .vercel/
 .vercel
+
+# Khoá mã hoá dữ liệu (tự tạo khi chạy trên máy). KHÔNG commit.
+data/.encryption-key

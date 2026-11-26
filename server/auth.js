@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { getDb, hashPassword, verifyPassword } = require('./db');
+const P = require('./planning');
 
 // Default active user information for guest / no-login mode
 const DEFAULT_USER_ID = 'usr_demo_1001';
@@ -16,8 +17,8 @@ async function ensureDemoUser() {
     const now = new Date().toISOString();
     
     await db.prepare(`
-      INSERT OR REPLACE INTO users (id, email, password_hash, salt, full_name, avatar, dob, gender, personal_goals, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO users (id, email, password_hash, salt, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       DEFAULT_USER_ID,
       DEFAULT_USER_EMAIL,
@@ -28,6 +29,7 @@ async function ensureDemoUser() {
       '1998-05-14',
       'Non-binary / Other',
       'Maintain mindful balance between graduate research, daily fitness, hydration, and emotional well-being.',
+      JSON.stringify({ willpower: 3, stress_tolerance: 3, motivation_source: 'Mục tiêu dài hạn', best_focus_time: 'morning', max_focus_minutes: 50, notes: 'Dễ mất tập trung khi thiếu ngủ.' }),
       now,
       now
     );
@@ -47,7 +49,7 @@ async function getDefaultUser() {
   const db = getDb();
   let user = null;
   try {
-    user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at FROM users WHERE id = ?').get(DEFAULT_USER_ID);
+    user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at FROM users WHERE id = ?').get(DEFAULT_USER_ID);
   } catch (e) {
     console.warn('[LifeCare Auth] getDefaultUser query warning:', e.message);
   }
@@ -55,7 +57,7 @@ async function getDefaultUser() {
   if (!user) {
     await ensureDemoUser();
     try {
-      user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at FROM users WHERE id = ?').get(DEFAULT_USER_ID);
+      user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at FROM users WHERE id = ?').get(DEFAULT_USER_ID);
     } catch (e) {}
   }
 
@@ -72,14 +74,9 @@ async function getDefaultUser() {
 
 async function seedInitialDemoData(userId) {
   const db = getDb();
-  const today = new Date();
-
-  // Helper date offset
-  const getDateStr = (offsetDays) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - offsetDays);
-    return d.toISOString().split('T')[0];
-  };
+  // Ngày theo múi giờ người dùng (không dùng UTC, tránh lệch ngày trước 7h sáng ở Việt Nam)
+  const todayStr = P.localNow().date;
+  const getDateStr = (offsetDays) => P.addDays(todayStr, -offsetDays);
 
   // Seed tasks for today and upcoming
   const tasks = [
@@ -195,19 +192,19 @@ async function seedInitialDemoData(userId) {
 
   // Seed 7 days of Health Check-ins
   const healthData = [
-    { days: 0, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water: 2.2, disc: '', notes: 'Felt well rested, morning yoga felt invigorating.' },
-    { days: 1, sleep: 7.0, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water: 2.4, disc: '', notes: 'Good energy throughout the afternoon.' },
-    { days: 2, sleep: 6.5, qual: 'Average', cond: 'Normal', energy: 3, ex: 'No', water: 1.8, disc: 'Slight lower back stiffness from sitting', notes: 'Need to stand up more frequently.' },
-    { days: 3, sleep: 8.0, qual: 'Very Good', cond: 'Very Good', energy: 5, ex: 'Yes', water: 2.5, disc: '', notes: 'Super energized today after solid 8h sleep!' },
-    { days: 4, sleep: 7.0, qual: 'Good', cond: 'Normal', energy: 4, ex: 'Yes', water: 2.1, disc: '', notes: 'Steady pace, hydrated regularly.' },
-    { days: 5, sleep: 6.0, qual: 'Poor', cond: 'Tired', energy: 2, ex: 'No', water: 1.5, disc: 'Mild headache in evening', notes: 'Stayed up reading late, felt sluggish.' },
-    { days: 6, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water: 2.0, disc: '', notes: 'Recovered well, took a brisk outdoor walk.' }
+    { days: 0, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2200, disc: '', notes: 'Felt well rested, morning yoga felt invigorating.' },
+    { days: 1, sleep: 7.0, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2400, disc: '', notes: 'Good energy throughout the afternoon.' },
+    { days: 2, sleep: 6.5, qual: 'Average', cond: 'Normal', energy: 3, ex: 'No', water_ml: 1800, disc: 'Slight lower back stiffness from sitting', notes: 'Need to stand up more frequently.' },
+    { days: 3, sleep: 8.0, qual: 'Very Good', cond: 'Very Good', energy: 5, ex: 'Yes', water_ml: 2500, disc: '', notes: 'Super energized today after solid 8h sleep!' },
+    { days: 4, sleep: 7.0, qual: 'Good', cond: 'Normal', energy: 4, ex: 'Yes', water_ml: 2100, disc: '', notes: 'Steady pace, hydrated regularly.' },
+    { days: 5, sleep: 6.0, qual: 'Poor', cond: 'Tired', energy: 2, ex: 'No', water_ml: 1500, disc: 'Mild headache in evening', notes: 'Stayed up reading late, felt sluggish.' },
+    { days: 6, sleep: 7.5, qual: 'Good', cond: 'Good', energy: 4, ex: 'Yes', water_ml: 2000, disc: '', notes: 'Recovered well, took a brisk outdoor walk.' }
   ];
 
   for (const h of healthData) {
     try {
       await db.prepare(`
-        INSERT OR IGNORE INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_intake, discomfort, notes, created_at)
+        INSERT OR IGNORE INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_ml, discomfort, notes, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
         `health_demo_${h.days}`,
@@ -218,7 +215,7 @@ async function seedInitialDemoData(userId) {
         h.cond,
         h.energy,
         h.ex,
-        h.water,
+        h.water_ml,
         h.disc,
         h.notes
       );
@@ -255,6 +252,37 @@ async function seedInitialDemoData(userId) {
         m.notes
       );
     } catch (e) {}
+  }
+
+  // Thời gian biểu mẫu (thiết lập một lần, tự lặp mỗi tuần) + một mục tiêu lớn đã chia nhỏ
+  try {
+    const now = new Date().toISOString();
+    for (const [i, b] of P.ROUTINE_TEMPLATES.university.entries()) {
+      await db.prepare(`INSERT OR IGNORE INTO routine_blocks (id, user_id, block_type, label, start_time, end_time, days, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(`blk_demo_${i}`, userId, b.block_type, b.label, b.start_time, b.end_time, b.days.join(','), now, now);
+    }
+    await db.prepare(`INSERT OR IGNORE INTO goals (id, user_id, title, description, deadline, estimated_minutes, priority, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'high', 'active', ?, ?)`)
+      .run('goal_demo_1', userId, 'Hoàn thành báo cáo nghiên cứu', 'Báo cáo 20 trang về kiến trúc cơ sở dữ liệu phân tán', getDateStr(-12), 900, getDateStr(5) + 'T08:00:00.000Z', now);
+    const goalTasks = [
+      ['task_goal_1', 'Đọc và tóm tắt 3 bài báo chính', getDateStr(3), '20:00', '21:30', 90, 'completed'],
+      ['task_goal_2', 'Lập dàn ý báo cáo', getDateStr(1), '20:00', '21:00', 60, 'completed'],
+      ['task_goal_3', 'Viết phần 1: Tổng quan', getDateStr(-1), '20:00', '21:30', 90, 'pending'],
+      ['task_goal_4', 'Viết phần 2: So sánh kiến trúc', getDateStr(-3), '19:45', '21:15', 90, 'pending']
+    ];
+    for (const [id, title, date, start, end, dur, status] of goalTasks) {
+      await db.prepare(`INSERT OR IGNORE INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, goal_id, duration_minutes, deadline, created_at, updated_at)
+        VALUES (?, ?, ?, '', 'Study', 'high', ?, ?, ?, ?, 0, 'goal_demo_1', ?, ?, ?, ?)`)
+        .run(id, userId, title, date, start, end, status, dur, getDateStr(-12), now, now);
+      if (status === 'completed') {
+        await db.prepare(`INSERT OR IGNORE INTO progress_logs (id, user_id, goal_id, task_id, log_date, minutes, kind, note, created_at)
+          VALUES (?, ?, 'goal_demo_1', ?, ?, ?, 'task_done', ?, ?)`).run('log_' + id, userId, id, date, dur, title, now);
+      }
+    }
+    await db.prepare(`INSERT OR IGNORE INTO progress_logs (id, user_id, goal_id, task_id, log_date, minutes, kind, note, created_at)
+      VALUES ('log_demo_extra', ?, 'goal_demo_1', NULL, ?, 45, 'extra', 'Đọc thêm tài liệu ngoài kế hoạch', ?)`).run(userId, getDateStr(2), now);
+  } catch (e) {
+    console.warn('[LifeCare Seed] Planning demo data:', e.message);
   }
 
   // Seed sample reminder notifications
@@ -310,7 +338,7 @@ async function getUserFromSession(token) {
       return null;
     }
     const user = await db.prepare(`
-      SELECT id, email, full_name, avatar, dob, gender, personal_goals, created_at, updated_at
+      SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at
       FROM users WHERE id = ?
     `).get(session.user_id);
     return user || null;

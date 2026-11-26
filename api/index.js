@@ -1,18 +1,5 @@
+// Điểm vào serverless trên Vercel. Khởi tạo dữ liệu (nạp từ Google Sheet, seed tài khoản demo)
+// được handleRequest lo ở request /api đầu tiên.
 const handleRequest = require('../server.js');
-const { initDatabase } = require('../server/db.js');
-const { ensureDemoUser } = require('../server/auth.js');
 
-let initialized = false;
-
-module.exports = async (req, res) => {
-  if (!initialized) {
-    try {
-      await initDatabase();
-      await ensureDemoUser();
-      initialized = true;
-    } catch (e) {
-      console.error('Error initializing database/demo data in serverless environment:', e);
-    }
-  }
-  return handleRequest(req, res);
-};
+module.exports = (req, res) => handleRequest(req, res);

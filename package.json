@@ -5,8 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "db:setup": "node scripts/setup-turso.js"
+    "dev": "node server.js"
   },
   "keywords": [
     "planner",

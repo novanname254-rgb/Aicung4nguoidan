@@ -148,6 +148,16 @@
           <span data-i18n="navPlanner">Kế Hoạch Của Tôi</span>
         </button>
 
+        <button class="nav-link" data-view="routine">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+          <span data-i18n="navRoutine">Thời Gian Biểu</span>
+        </button>
+
+        <button class="nav-link" data-view="goals">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          <span data-i18n="navGoals">Mục Tiêu & Tiến Độ</span>
+        </button>
+
         <button class="nav-link" data-view="physical">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           <span data-i18n="navPhysical">Sức Khỏe Thể Chất</span>
@@ -252,6 +262,7 @@
               <button class="btn btn-secondary" id="btnDashNewTask">
                 <span data-i18n="newTaskBtn">+ Thêm Công Việc</span>
               </button>
+              <button class="btn btn-secondary" id="btnDashDisruption">⚠️ Báo gián đoạn</button>
             </div>
           </div>
 
@@ -287,6 +298,9 @@
               <div>🧘 <span id="wellbeingStressPill">Căng thẳng: --/5</span></div>
             </div>
           </div>
+
+          <!-- Cảnh báo tính khả thi & tiến độ mục tiêu -->
+          <div id="dashGoalAlerts"></div>
 
           <!-- Smart Schedule Recommendation Card -->
           <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary);" id="scheduleRecCard">
@@ -397,6 +411,7 @@
             <div class="calendar-controls">
               <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
                 <button class="btn btn-primary" id="btnOpenNewTaskModal" data-i18n="createTaskEvent">+ Tạo Công Việc / Sự Kiện</button>
+                <button class="btn btn-secondary" id="btnOpenDisruption" title="Khai báo sự cố, nghỉ học, việc phát sinh...">⚠️ Báo gián đoạn</button>
                 <div class="calendar-view-tabs">
                   <button class="view-tab-btn active" data-cal-view="month" data-i18n="month">Tháng</button>
                   <button class="view-tab-btn" data-cal-view="week" data-i18n="week">Tuần</button>
@@ -425,6 +440,15 @@
               </div>
             </div>
 
+            <!-- Điều hướng thời gian -->
+            <div class="cal-nav">
+              <button class="btn-icon" id="calPrevBtn" title="Trước">‹</button>
+              <button class="btn btn-secondary cal-today-btn" id="calTodayBtn">Hôm nay</button>
+              <button class="btn-icon" id="calNextBtn" title="Sau">›</button>
+              <div class="cal-period-label" id="calPeriodLabel"></div>
+              <div class="cal-legend" id="calLegend"></div>
+            </div>
+
             <!-- Month / Week / Day Container -->
             <div id="calendarDisplayArea">
               <!-- Injected dynamically -->
@@ -437,6 +461,80 @@
             <div id="allTasksList">
               <!-- Injected via JS -->
             </div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW: THỜI GIAN BIỂU THEO KHUNG GIỜ (thiết lập một lần, tự lặp mỗi tuần) -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-routine">
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="section-head">
+              <div>
+                <h3 class="card-title" style="margin-bottom: 4px;">Thời gian biểu cố định</h3>
+                <p class="muted-text">Chia ngày thành các khung giờ: ngủ nghỉ, ăn uống, đi học, học thêm, giải trí, tập luyện, tự học. Chỉ cần thiết lập một lần, lịch tự lặp lại cho các tuần sau. Thời gian còn trống được AI phân bổ theo mục tiêu và thói quen của bạn. <span id="routineTzLabel"></span></p>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-primary" id="btnAddBlock">+ Thêm khung giờ</button>
+                <button class="btn btn-accent" id="btnAiAllocate">✨ AI phân bổ giờ trống</button>
+              </div>
+            </div>
+
+            <div class="template-box">
+              <div>
+                <strong>Thiết lập nhanh một lần</strong>
+                <div class="muted-text">Chọn một mẫu rồi chỉnh lại cho hợp với bạn.</div>
+              </div>
+              <div class="template-controls">
+                <select id="routineTemplateSelect" class="form-control">
+                  <option value="student">Học sinh (THCS/THPT)</option>
+                  <option value="university">Sinh viên</option>
+                  <option value="worker">Người đi làm</option>
+                </select>
+                <div class="day-picker" id="templateDayPicker"></div>
+                <label class="inline-check"><input type="checkbox" id="routineTemplateReplace" checked /> Thay thời gian biểu hiện tại</label>
+                <button class="btn btn-secondary" id="btnApplyTemplate">Áp dụng</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="section-head">
+              <h3 class="card-title" style="margin-bottom: 0;">Tuần này theo khung giờ</h3>
+              <div class="btn-row">
+                <button class="btn-icon" id="routinePrevWeek" title="Tuần trước">‹</button>
+                <span class="cal-period-label" id="routineWeekLabel"></span>
+                <button class="btn-icon" id="routineNextWeek" title="Tuần sau">›</button>
+              </div>
+            </div>
+            <div class="block-legend" id="blockLegend"></div>
+            <div id="routineWeekGrid" class="routine-week"></div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Các khung giờ đã thiết lập</h3>
+            <div id="routineBlockList"></div>
+          </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- VIEW: MỤC TIÊU, CỘT MỐC & DỰ BÁO HOÀN THÀNH -->
+        <!-- ============================================== -->
+        <section class="view-section" id="view-goals">
+          <div class="card" style="margin-bottom: 20px;">
+            <div class="section-head">
+              <div>
+                <h3 class="card-title" style="margin-bottom: 4px;">Mục tiêu lớn & tiến độ</h3>
+                <p class="muted-text">AI chia mục tiêu lớn thành việc cụ thể (thời lượng, ưu tiên, hạn). Mọi lần hoàn thành, kể cả học/làm thêm ngoài lịch, đều được ghi lại để dự báo bạn xong sớm hay trễ hơn dự kiến.</p>
+              </div>
+              <button class="btn btn-primary" id="btnNewGoal">+ Mục tiêu mới</button>
+            </div>
+            <div id="goalsSummary" class="goals-summary"></div>
+          </div>
+          <div id="goalsList"></div>
+          <div class="card" style="margin-top: 20px;">
+            <h3 class="card-title">Nhật ký tiến độ gần đây</h3>
+            <div id="progressLogList"></div>
           </div>
         </section>
 
@@ -495,8 +593,8 @@
                       </select>
                     </div>
                     <div class="form-group">
-                      <label data-i18n="waterIntake">5. Lượng nước đã uống (Lít)</label>
-                      <input type="number" step="0.1" min="0" max="10" id="physWater" class="form-control" placeholder="e.g. 2.0" />
+                      <label data-i18n="waterIntake">5. Lượng nước đã uống (ml)</label>
+                      <input type="number" step="50" min="0" max="10000" id="physWater" class="form-control" placeholder="VD: 1800" />
                     </div>
                   </div>
 
@@ -526,8 +624,8 @@
 
                   <!-- Meal tracking -->
                   <div class="form-group">
-                    <label data-i18n="mealsTracking">7. Nhật ký bữa ăn dinh dưỡng</label>
-                    <input type="text" id="physMealsSummary" class="form-control" placeholder="e.g. Sáng: bánh mì trứng, Trưa: cơm rau cá, Tối: salad ức gà" />
+                    <label data-i18n="mealsTracking">7. Dự kiến bữa ăn / chế độ dinh dưỡng</label>
+                    <input type="text" id="physMealsSummary" class="form-control" placeholder="VD: Sáng: yến mạch + trứng, Trưa: cơm, rau, cá, Tối: salad ức gà" />
                   </div>
 
                   <div class="form-group">
@@ -857,6 +955,51 @@
                 </form>
               </div>
 
+              <!-- Tâm lý & ý chí nền cố định -->
+              <div class="card" style="margin-bottom: 24px;">
+                <h3 class="card-title">Tâm lý & ý chí nền (cố định)</h3>
+                <p class="muted-text" style="margin-bottom: 14px;">Đây là "con người thường ngày" của bạn. Mỗi ngày bạn làm một bài kiểm tra nhanh trạng thái, AI so sánh với mốc này để điều chỉnh nhẹ lịch hôm đó.</p>
+                <form id="psychForm">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Sức bền ý chí</label>
+                      <select id="psyWillpower" class="form-control">
+                        <option value="1">1 - Dễ bỏ cuộc</option><option value="2">2 - Cần nhắc nhiều</option><option value="3" selected>3 - Trung bình</option><option value="4">4 - Khá kiên trì</option><option value="5">5 - Rất kỷ luật</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Khả năng chịu áp lực</label>
+                      <select id="psyStress" class="form-control">
+                        <option value="1">1 - Rất dễ căng thẳng</option><option value="2">2 - Hơi dễ căng thẳng</option><option value="3" selected>3 - Trung bình</option><option value="4">4 - Khá vững</option><option value="5">5 - Rất vững</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Điều thúc đẩy bạn nhất</label>
+                      <select id="psyMotivation" class="form-control">
+                        <option>Mục tiêu dài hạn</option><option>Phần thưởng ngắn hạn</option><option>Áp lực hạn chót</option><option>Sự ghi nhận của người khác</option><option>Niềm vui / sự tò mò</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Giờ tập trung tốt nhất</label>
+                      <select id="psyFocusTime" class="form-control">
+                        <option value="morning">Buổi sáng</option><option value="afternoon">Buổi chiều</option><option value="evening">Buổi tối</option><option value="night">Đêm khuya</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Tập trung liền tối đa (phút)</label>
+                      <input type="number" id="psyFocusMinutes" class="form-control" min="10" max="240" step="5" value="45" />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Ghi chú về bản thân <small>(không bắt buộc)</small></label>
+                    <input type="text" id="psyNotes" class="form-control" maxlength="500" placeholder="VD: hay trì hoãn việc khó, học tốt khi có bạn học cùng..." />
+                  </div>
+                  <button type="submit" class="btn btn-primary">Lưu tâm lý nền</button>
+                </form>
+              </div>
+
               <!-- Change Password -->
               <div class="card">
                 <h3 class="card-title" data-i18n="changePassword">Đổi Mật Khẩu</h3>
@@ -895,6 +1038,22 @@
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.9rem;">
                       <input type="checkbox" id="setRemindTasks" checked /> <span data-i18n="remindTasksCheck">Thông báo lịch trình và hạn công việc</span>
                     </label>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>Nhắc lại nếu chưa xác nhận hoàn thành sau</label>
+                      <select id="setRemindRepeat" class="form-control">
+                        <option value="5">5 phút</option><option value="10">10 phút</option><option value="15" selected>15 phút</option><option value="20">20 phút</option><option value="30">30 phút</option><option value="45">45 phút</option><option value="60">60 phút</option>
+                      </select>
+                    </div>
+                    <div class="form-group" style="justify-content: flex-end;">
+                      <label class="inline-check"><input type="checkbox" id="setRemindOverdue" checked /> Cảnh báo khi mục tiêu có nguy cơ không kịp</label>
+                    </div>
+                  </div>
+                  <div class="notif-permission-row">
+                    <span id="notifPermissionText" class="muted-text">Thông báo trình duyệt: đang kiểm tra...</span>
+                    <button type="button" class="btn btn-secondary" id="btnEnableBrowserNotif">🔔 Bật thông báo trình duyệt</button>
                   </div>
 
                   <div class="form-row">
@@ -1009,6 +1168,20 @@
         </div>
         <div class="form-row">
           <div class="form-group">
+            <label>Thuộc mục tiêu</label>
+            <select id="taskGoal" class="form-control"><option value="">— Không thuộc mục tiêu nào —</option></select>
+          </div>
+          <div class="form-group">
+            <label>Thời lượng (phút)</label>
+            <input type="number" id="taskDuration" class="form-control" min="1" max="1440" step="5" placeholder="VD: 45" />
+          </div>
+          <div class="form-group">
+            <label>Hạn chót</label>
+            <input type="date" id="taskDeadline" class="form-control" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
             <label data-i18n="recurring">Lặp lại định kỳ</label>
             <select id="taskRecurring" class="form-control">
               <option value="none" data-i18n="recurringNone">Không lặp lại</option>
@@ -1035,8 +1208,8 @@
     <div class="modal-content" style="max-width: 480px;">
       <div class="modal-header">
         <div>
-          <h3>⚡ Điểm Danh Nhanh Thân - Tâm 30 Giây</h3>
-          <p style="font-size: 0.8rem; color: var(--text-muted);">Khảo sát ngắn gọn buổi sáng hoặc tối</p>
+          <h3>⚡ Kiểm tra nhanh trạng thái hôm nay</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">30 giây. AI so sánh với tâm lý nền của bạn rồi điều chỉnh nhẹ lịch hôm nay.</p>
         </div>
         <button class="modal-close" id="rapidModalClose">✕</button>
       </div>
@@ -1068,8 +1241,24 @@
             <option value="2" selected>2 - Áp lực nhẹ, kiểm soát tốt</option>
             <option value="3">3 - Hơi căng thẳng</option>
             <option value="4">4 - Khá nhiều áp lực</option>
+            <option value="5">5 - Quá tải</option>
           </select>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>4. Năng lượng cơ thể</label>
+            <select id="rapidEnergy" class="form-control">
+              <option value="1">1 - Kiệt sức</option><option value="2">2 - Mệt</option><option value="3" selected>3 - Tạm ổn</option><option value="4">4 - Khoẻ</option><option value="5">5 - Tràn đầy</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>5. Ý chí / động lực hôm nay</label>
+            <select id="rapidMotivation" class="form-control">
+              <option value="1">1 - Không muốn làm gì</option><option value="2">2 - Uể oải</option><option value="3" selected>3 - Bình thường</option><option value="4">4 - Có động lực</option><option value="5">5 - Rất quyết tâm</option>
+            </select>
+          </div>
+        </div>
+        <label class="inline-check" style="margin-bottom: 14px;"><input type="checkbox" id="rapidAiAdjust" checked /> Để AI điều chỉnh nhẹ lịch hôm nay theo trạng thái này</label>
         <button type="submit" class="btn btn-primary" style="width: 100%;">Hoàn Thành Trong 30 Giây</button>
       </form>
     </div>
@@ -1104,6 +1293,140 @@
     </form>
   </div>
 
+  <!-- KHAI BÁO GIÁN ĐOẠN LỊCH TRÌNH -->
+  <div class="modal-overlay" id="disruptionModal">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <div>
+          <h3>⚠️ Báo gián đoạn lịch trình</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted);">AI sẽ cân nhắc ưu tiên, hạn chót và thời gian còn lại để xếp lại, không đơn giản dồn hết sang ngày mai.</p>
+        </div>
+        <button class="modal-close" data-close-modal="disruptionModal">✕</button>
+      </div>
+      <form id="disruptionForm">
+        <div class="form-group">
+          <label>Loại gián đoạn</label>
+          <select id="disKind" class="form-control">
+            <option value="incident">Sự cố (ốm, hỏng xe, việc gia đình...)</option>
+            <option value="class_off">Nghỉ học / lớp bị huỷ</option>
+            <option value="new_work">Công việc phát sinh</option>
+            <option value="unavailable">Không thể thực hiện nhiệm vụ trong khoảng này</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Ngày</label>
+            <input type="date" id="disDate" class="form-control" required />
+          </div>
+          <div class="form-group" style="justify-content: flex-end;">
+            <label class="inline-check"><input type="checkbox" id="disAllDay" /> Cả ngày</label>
+          </div>
+        </div>
+        <div class="form-row" id="disTimeRow">
+          <div class="form-group"><label>Từ</label><input type="time" id="disStart" class="form-control" /></div>
+          <div class="form-group"><label>Đến</label><input type="time" id="disEnd" class="form-control" /></div>
+        </div>
+        <div class="form-group">
+          <label>Mô tả <small>(việc phát sinh là gì, mất bao lâu, hạn khi nào...)</small></label>
+          <textarea id="disNote" class="form-control" maxlength="500" placeholder="VD: Phải làm bài tập nhóm gấp khoảng 2 tiếng, nộp tối thứ 6"></textarea>
+        </div>
+        <label class="inline-check" style="margin-bottom: 14px;"><input type="checkbox" id="disAiReplan" checked /> Nhờ AI sắp xếp lại các việc bị ảnh hưởng ngay</label>
+        <div id="disUpcomingList"></div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Lưu gián đoạn</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MỤC TIÊU LỚN -->
+  <div class="modal-overlay" id="goalModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 id="goalModalTitle">Mục tiêu mới</h3>
+        <button class="modal-close" data-close-modal="goalModal">✕</button>
+      </div>
+      <form id="goalForm">
+        <input type="hidden" id="goalIdInput" />
+        <div class="form-group">
+          <label>Tên mục tiêu</label>
+          <input type="text" id="goalTitle" class="form-control" maxlength="200" required placeholder="VD: Ôn thi IELTS đạt 6.5" />
+        </div>
+        <div class="form-group">
+          <label>Mô tả <small>(trình độ hiện tại, yêu cầu cụ thể...)</small></label>
+          <textarea id="goalDesc" class="form-control" maxlength="2000"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Hạn chót</label><input type="date" id="goalDeadline" class="form-control" /></div>
+          <div class="form-group"><label>Tổng thời lượng dự kiến (giờ)</label><input type="number" id="goalHours" class="form-control" min="0.5" step="0.5" placeholder="Để trống: AI ước lượng" /></div>
+          <div class="form-group">
+            <label>Ưu tiên</label>
+            <select id="goalPriority" class="form-control"><option value="high">Cao</option><option value="medium" selected>Vừa</option><option value="low">Thấp</option></select>
+          </div>
+        </div>
+        <div class="form-group" id="goalStatusGroup" style="display: none;">
+          <label>Trạng thái</label>
+          <select id="goalStatus" class="form-control"><option value="active">Đang thực hiện</option><option value="paused">Tạm dừng</option><option value="done">Đã xong</option></select>
+        </div>
+        <label class="inline-check" id="goalAiRow" style="margin-bottom: 14px;"><input type="checkbox" id="goalAiBreakdown" checked /> Nhờ AI chia nhỏ thành công việc cụ thể và xếp vào giờ trống</label>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Lưu mục tiêu</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- GHI TIẾN ĐỘ THÊM -->
+  <div class="modal-overlay" id="progressModal">
+    <div class="modal-content" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3>+ Ghi thêm tiến độ</h3>
+        <button class="modal-close" data-close-modal="progressModal">✕</button>
+      </div>
+      <p class="muted-text" style="margin-bottom: 12px;">Bạn đã học/làm nhiều hơn lịch? Ghi lại để % hoàn thành và dự báo được cập nhật.</p>
+      <form id="progressForm">
+        <input type="hidden" id="progressGoalId" />
+        <div class="form-row">
+          <div class="form-group"><label>Số phút</label><input type="number" id="progressMinutes" class="form-control" min="1" max="1440" required value="30" /></div>
+          <div class="form-group"><label>Ngày</label><input type="date" id="progressDate" class="form-control" /></div>
+        </div>
+        <div class="form-group"><label>Ghi chú</label><input type="text" id="progressNote" class="form-control" maxlength="300" placeholder="VD: làm thêm 2 đề luyện" /></div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Lưu</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- KHUNG GIỜ CỐ ĐỊNH -->
+  <div class="modal-overlay" id="blockModal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 id="blockModalTitle">Thêm khung giờ</h3>
+        <button class="modal-close" data-close-modal="blockModal">✕</button>
+      </div>
+      <form id="blockForm">
+        <input type="hidden" id="blockIdInput" />
+        <div class="form-row">
+          <div class="form-group">
+            <label>Loại</label>
+            <select id="blockType" class="form-control">
+              <option value="sleep">😴 Ngủ nghỉ</option><option value="meal">🍽️ Ăn uống</option><option value="school">🏫 Đi học / đi làm</option>
+              <option value="extra_class">📘 Học thêm</option><option value="leisure">🎮 Giải trí</option><option value="exercise">🏃 Tập luyện</option><option value="study">📚 Tự học</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Tên hiển thị</label><input type="text" id="blockLabel" class="form-control" maxlength="80" placeholder="VD: Học thêm Toán" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Bắt đầu</label><input type="time" id="blockStart" class="form-control" required /></div>
+          <div class="form-group"><label>Kết thúc <small>(qua đêm được)</small></label><input type="time" id="blockEnd" class="form-control" required /></div>
+        </div>
+        <div class="form-group">
+          <label>Áp dụng cho các ngày</label>
+          <div class="day-picker" id="blockDayPicker"></div>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Lưu khung giờ</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Nhắc việc đến giờ (trong ứng dụng) -->
+  <div id="reminderStack" class="reminder-stack" aria-live="polite"></div>
+
   <!-- NOTIFICATION DROPDOWN POPUP -->
   <div class="modal-overlay" id="notifModal">
     <div class="modal-content" style="max-width: 440px;">
@@ -1123,5 +1446,6 @@
   <!-- SCRIPTS -->
   <script src="/js/i18n.js"></script>
   <script src="/js/app.js"></script>
+  <script src="/js/planning-ui.js"></script>
 </body>
 </html>
