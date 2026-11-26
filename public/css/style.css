@@ -1608,3 +1608,10 @@ body.rw-dragging, body.rw-dragging * { cursor: grabbing !important; user-select:
 .delete-plans-actions { justify-content: space-between; margin-top: 12px; }
 .delete-plans-empty { padding: 20px; text-align: center; }
 .delete-plans-choice[hidden], .delete-plans-picker[hidden] { display: none !important; }
+/* Kéo mép dưới để đổi giờ kết thúc */
+.rw-task .rw-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; touch-action: none; }
+.rw-task .rw-resize::after { content: ''; position: absolute; left: 50%; bottom: 2px; width: 16px; height: 2px; margin-left: -8px; border-radius: 2px; background: rgba(255, 255, 255, 0.75); opacity: 0; transition: opacity 0.15s; }
+.rw-task:hover .rw-resize::after, .rw-task.resizing .rw-resize::after { opacity: 1; }
+.rw-task.resizing { z-index: 5; outline: 2px solid var(--primary); }
+@media (hover: none) { .rw-task .rw-resize { height: 12px; } .rw-task .rw-resize::after { opacity: 1; } }
+body.rw-resizing, body.rw-resizing * { cursor: ns-resize !important; user-select: none; }

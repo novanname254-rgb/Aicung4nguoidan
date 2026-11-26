@@ -527,7 +527,7 @@ async function loadDashboard() {
       emoji = '🌙';
     }
 
-    const firstName = dash.user.full_name ? dash.user.full_name.split(' ')[0] : '';
+    const firstName = dash.user.full_name ? tr(dash.user.full_name.split(' ')[0]) : '';
     document.getElementById('welcomeGreeting').innerText = `${timeGreeting}, ${firstName}! ${emoji}`;
 
     // Fixed Date formatting

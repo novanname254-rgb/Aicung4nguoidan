@@ -221,7 +221,8 @@ const I18N = {
     deleteAccount: "Xóa Vĩnh Viễn Tài Khoản",
     languagePreference: "Ngôn Ngữ Ứng Dụng",
     langVietnamese: "Tiếng Việt (Mặc định)",
-    langEnglish: "English"
+    langEnglish: "English",
+    aiWelcome: "Xin chào! Tôi là Trợ lý AI LifeCare. Tôi có thể giúp bạn cân bằng lịch trình, hướng dẫn bài tập thở thư giãn, hoặc phân tích xu hướng sức khỏe từ dữ liệu bạn ghi nhận. Bạn cần tôi hỗ trợ điều gì hôm nay?"
   },
 
   en: {
@@ -443,7 +444,8 @@ const I18N = {
     deleteAccount: "Delete Account Permanently",
     languagePreference: "Language Preference",
     langVietnamese: "Tiếng Việt",
-    langEnglish: "English"
+    langEnglish: "English",
+    aiWelcome: "Hi! I'm the LifeCare AI assistant. I can help you balance your schedule, guide relaxing breathing exercises, or analyze health trends from your logs. How can I help you today?"
   }
 };
 
