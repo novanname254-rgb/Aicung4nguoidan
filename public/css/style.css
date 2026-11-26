@@ -1635,3 +1635,22 @@ body.rw-dragging, body.rw-dragging * { cursor: grabbing !important; user-select:
   .rw-task .rw-resize::after, .rw-block .rw-resize::after { opacity: 0.8; }
 }
 body.rw-resizing, body.rw-resizing * { cursor: ns-resize !important; user-select: none; }
+
+/* ---------------------------------------------------------------- Chọn việc cần nhắc hôm nay */
+.notif-modal-content { max-height: 88vh; overflow-y: auto; }
+.today-reminders { background: var(--bg-subtle); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px; margin-bottom: 14px; }
+.today-reminders-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-heading); }
+.today-reminders-hint { font-size: 0.78rem; margin: 4px 0 8px; }
+.today-reminders-sub { font-size: 0.9rem; font-weight: 700; color: var(--text-heading); margin: 0 0 8px; }
+.today-remind-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.today-remind-list > p { padding: 10px 12px; }
+.today-remind-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; border-top: 1px solid var(--border-color); }
+.today-remind-item:first-child { border-top: 0; }
+.today-remind-item:hover { background: var(--bg-subtle); }
+.today-remind-item input { flex-shrink: 0; width: 17px; height: 17px; }
+.today-remind-item .tr-time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--primary); font-size: 0.82rem; }
+.today-remind-item .tr-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-heading); font-size: 0.86rem; }
+.today-remind-item .tr-note { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.today-remind-item.muted { opacity: 0.6; }
+.today-remind-sound { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.today-remind-sound .inline-check { flex: 1; min-width: 200px; }

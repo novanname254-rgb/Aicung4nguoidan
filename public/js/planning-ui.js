@@ -1199,8 +1199,10 @@ function checkReminders() {
   const repeatMs = (s.remind_repeat_minutes || 15) * 60000;
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const st = reminderState();
+  const off = remindOffSet();
   for (const t of Reminders.tasks) {
     if (t.status === 'completed' || !t.start_time || t.date !== todayLocal()) continue;
+    if (off.has(t.id)) continue; // người dùng bỏ tích công việc này trong danh sách nhắc
     const start = hmToMin(t.start_time);
     const end = t.end_time ? hmToMin(t.end_time) : start + (t.duration_minutes || 30);
     if (nowMin < start || nowMin > end + 60) continue; // chỉ nhắc từ lúc bắt đầu tới 1 giờ sau khi kết thúc
@@ -1239,7 +1241,166 @@ function showTaskReminder(t, overdue) {
   card.querySelector('[data-r="close"]').addEventListener('click', () => card.remove());
   stack.prepend(card);
   while (stack.children.length > 3) stack.lastChild.remove();
-  browserNotify(`⏰ ${title}`, `${t.title} (${t.start_time}${t.end_time ? '–' + t.end_time : ''})`, `task-${t.id}`);
+  alertReminder(`⏰ ${title}`, `${t.title} (${t.start_time}${t.end_time ? '–' + t.end_time : ''})`, `task-${t.id}`);
+}
+
+// ---------------------------------------------------------------- chọn việc cần nhắc + âm báo
+// Lưu trên thiết bị (nhắc việc chạy trong trình duyệt của máy này):
+// - lifecare_remind_off: mã các công việc đã bỏ tích (mặc định mọi việc có giờ đều được nhắc)
+// - lifecare_remind_sound: '1' / '0' (mặc định bật)
+function remindOffSet() {
+  try { return new Set(JSON.parse(localStorage.getItem('lifecare_remind_off') || '[]')); } catch (e) { return new Set(); }
+}
+function saveRemindOff(set) {
+  try { localStorage.setItem('lifecare_remind_off', JSON.stringify([...set].slice(-500))); } catch (e) {}
+}
+const remindSoundOn = () => { try { return localStorage.getItem('lifecare_remind_sound') !== '0'; } catch (e) { return true; } };
+
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+
+/**
+ * Nhắc có âm thanh. Thông báo hệ thống (qua service worker) dùng âm báo mặc định của điện thoại
+ * và rung, kể cả khi đang mở ứng dụng. Nếu chưa được phép gửi thông báo thì phát tiếng chuông ngắn.
+ */
+async function alertReminder(title, body, tag) {
+  const sound = remindSoundOn();
+  const shown = await browserNotify(title, body, tag, { force: sound, sound });
+  if (sound && !shown) playReminderChime();
+  if (sound && navigator.vibrate) { try { navigator.vibrate([250, 120, 250]); } catch (e) {} }
+}
+
+let reminderAudioCtx = null;
+function unlockReminderAudio() {
+  // Trình duyệt chỉ cho phát âm thanh sau một lần người dùng chạm / bấm
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    reminderAudioCtx = reminderAudioCtx || new AC();
+    if (reminderAudioCtx.state === 'suspended') reminderAudioCtx.resume();
+  } catch (e) {}
+}
+function playReminderChime() {
+  try {
+    unlockReminderAudio();
+    const ctx = reminderAudioCtx;
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.02;
+    [[880, 0], [1175, 0.18], [880, 0.5], [1175, 0.68]].forEach(([freq, at]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0 + at);
+      gain.gain.exponentialRampToValueAtTime(0.35, t0 + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.16);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0 + at);
+      osc.stop(t0 + at + 0.18);
+    });
+  } catch (e) {}
+}
+
+function updateRemindSoundNote() {
+  const el = document.getElementById('remindSoundNote');
+  if (!el) return;
+  let msg;
+  if (isIOS() && !isStandalone()) {
+    msg = L('Trên iPhone/iPad: bấm Chia sẻ → "Thêm vào MH chính" rồi mở LifeCare từ màn hình chính để nhận thông báo có âm báo của máy.',
+      'On iPhone/iPad: tap Share → "Add to Home Screen", then open LifeCare from the home screen to get notifications with the phone\'s sound.');
+  } else if (!('Notification' in window)) {
+    msg = L('Trình duyệt này không hỗ trợ thông báo hệ thống, ứng dụng sẽ phát tiếng chuông ngắn thay thế.', 'This browser has no system notifications; the app plays a short chime instead.');
+  } else if (Notification.permission === 'granted') {
+    msg = L('Đã cho phép thông báo: nhắc việc dùng âm báo và rung mặc định của máy. Nếu không nghe thấy, kiểm tra chế độ im lặng hoặc cài đặt thông báo của trình duyệt.',
+      'Notifications allowed: reminders use your phone\'s default sound and vibration. If you hear nothing, check silent mode or the browser\'s notification settings.');
+  } else if (Notification.permission === 'denied') {
+    msg = L('Thông báo đang bị chặn nên chỉ phát được tiếng chuông ngắn khi đang mở ứng dụng. Mở cài đặt trang web để cho phép lại.',
+      'Notifications are blocked, so only a short chime plays while the app is open. Allow them again in the site settings.');
+  } else {
+    msg = L('Bấm "Thử âm báo" và chọn Cho phép để dùng âm báo mặc định của máy.', 'Tap "Test sound" and choose Allow to use your phone\'s default sound.');
+  }
+  const st = AppState.settings || {};
+  let extra = '';
+  if (st.remind_tasks === 0) extra = ' ' + L('⚠️ Nhắc công việc đang tắt trong Cài đặt.', '⚠️ Task reminders are turned off in Settings.');
+  else if (inQuietHours(st)) extra = ' ' + L(`🌙 Đang trong giờ yên lặng (${st.quiet_hours_start}–${st.quiet_hours_end}) nên tạm không nhắc.`, `🌙 Quiet hours (${st.quiet_hours_start}–${st.quiet_hours_end}): reminders are paused.`);
+  el.textContent = msg + ' ' + L('Nhắc việc hoạt động khi LifeCare đang mở (kể cả chạy nền).', 'Reminders work while LifeCare is open (including in the background).') + extra;
+}
+
+async function renderTodayReminderPicker() {
+  const box = document.getElementById('todayRemindList');
+  if (!box) return;
+  box.innerHTML = `<p class="muted-text">${L('Đang tải...', 'Loading...')}</p>`;
+  await refreshReminderTasks();
+  const off = remindOffSet();
+  const tasks = Reminders.tasks.filter(t => t.date === todayLocal())
+    .sort((a, b) => (a.start_time || '99').localeCompare(b.start_time || '99'));
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  if (!tasks.length) {
+    box.innerHTML = `<p class="muted-text">${L('Hôm nay chưa có công việc nào.', 'No tasks today.')}</p>`;
+  } else {
+    box.innerHTML = tasks.map(t => {
+      const done = t.status === 'completed';
+      const noTime = !t.start_time;
+      const end = t.end_time ? hmToMin(t.end_time) : (t.start_time ? hmToMin(t.start_time) + (t.duration_minutes || 30) : 0);
+      const past = !noTime && nowMin > end + 60;
+      const note = done ? L('đã xong', 'done') : noTime ? L('chưa có giờ', 'no time set') : past ? L('đã qua', 'passed') : '';
+      return `
+        <label class="today-remind-item ${done || noTime || past ? 'muted' : ''}">
+          <input type="checkbox" value="${escapeHTML(t.id)}" ${off.has(t.id) || done || noTime ? '' : 'checked'} ${done || noTime ? 'disabled' : ''} />
+          <span class="tr-time">${t.start_time || '--:--'}</span>
+          <span class="tr-title">${escapeHTML(t.title)}</span>
+          ${note ? `<span class="tr-note">${note}</span>` : ''}
+        </label>`;
+    }).join('');
+    box.querySelectorAll('input[type=checkbox]').forEach(c => c.addEventListener('change', () => {
+      const set = remindOffSet();
+      if (c.checked) set.delete(c.value); else set.add(c.value);
+      saveRemindOff(set);
+      syncRemindAllBox();
+    }));
+  }
+  document.getElementById('remindSoundToggle').checked = remindSoundOn();
+  syncRemindAllBox();
+  updateRemindSoundNote();
+}
+
+function syncRemindAllBox() {
+  const boxes = [...document.querySelectorAll('#todayRemindList input[type=checkbox]:not(:disabled)')];
+  const all = document.getElementById('todayRemindAll');
+  all.disabled = !boxes.length;
+  all.checked = boxes.length > 0 && boxes.every(b => b.checked);
+  all.indeterminate = boxes.some(b => b.checked) && !all.checked;
+}
+
+function bindTodayReminderPicker() {
+  document.getElementById('notifBellBtn')?.addEventListener('click', renderTodayReminderPicker);
+  document.getElementById('todayRemindAll').addEventListener('change', e => {
+    const set = remindOffSet();
+    document.querySelectorAll('#todayRemindList input[type=checkbox]:not(:disabled)').forEach(c => {
+      c.checked = e.target.checked;
+      if (c.checked) set.delete(c.value); else set.add(c.value);
+    });
+    saveRemindOff(set);
+    syncRemindAllBox();
+  });
+  document.getElementById('remindSoundToggle').addEventListener('change', e => {
+    try { localStorage.setItem('lifecare_remind_sound', e.target.checked ? '1' : '0'); } catch (err) {}
+    if (e.target.checked) unlockReminderAudio();
+  });
+  document.getElementById('btnTestReminderSound').addEventListener('click', async () => {
+    unlockReminderAudio();
+    if ('Notification' in window && Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (e) {}
+      updateNotifPermissionText();
+      updateRemindSoundNote();
+    }
+    const shown = await browserNotify(L('🔔 Thử âm báo LifeCare', '🔔 LifeCare test sound'),
+      L('Bạn sẽ nghe âm báo này khi đến giờ công việc đã chọn.', 'You will hear this when a selected task is due.'), 'lifecare-test', { force: true, sound: true });
+    if (!shown) playReminderChime();
+    if (navigator.vibrate) { try { navigator.vibrate([250, 120, 250]); } catch (e) {} }
+  });
+  // Mở khoá âm thanh ở lần chạm đầu tiên để tiếng chuông dự phòng phát được về sau
+  window.addEventListener('pointerdown', unlockReminderAudio, { once: true });
 }
 
 function notifyFeasibilityOncePerDay(alerts) {
@@ -1252,14 +1413,20 @@ function notifyFeasibilityOncePerDay(alerts) {
   browserNotify(L('⚠️ Mục tiêu có nguy cơ không kịp', '⚠️ Goal at risk'), `${g.title}: ${g.progress.feasibility.message}`, 'feasibility');
 }
 
-async function browserNotify(title, body, tag) {
-  if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
-  const opts = { body, tag, icon: '/icons/icon-192.svg' };
+/**
+ * Thông báo hệ thống. Mặc định chỉ hiện khi đang ở tab khác; force = hiện cả khi đang mở app.
+ * sound = để máy phát âm báo + rung mặc định (silent: false, renotify). Trả về true nếu đã hiện.
+ */
+async function browserNotify(title, body, tag, { force = false, sound = false } = {}) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+  if (!document.hidden && !force) return false;
+  const opts = { body, tag, icon: '/icons/icon-192.svg', badge: '/icons/icon-192.svg', silent: !sound, renotify: sound, requireInteraction: sound };
+  if (sound) opts.vibrate = [250, 120, 250];
   try {
     const reg = await navigator.serviceWorker?.getRegistration();
-    if (reg) return reg.showNotification(title, opts);
+    if (reg) { await reg.showNotification(title, opts); return true; }
   } catch (e) {}
-  try { new Notification(title, opts); } catch (e) {}
+  try { new Notification(title, opts); return true; } catch (e) { return false; }
 }
 
 function updateNotifPermissionText() {
@@ -1464,6 +1631,9 @@ function bindPlanningUI() {
       showToast(L('Đã lưu tâm lý nền.', 'Baseline saved.'));
     } catch (err) { showToast(err.message, 'error'); }
   });
+
+  // Chọn việc cần nhắc hôm nay + âm báo
+  bindTodayReminderPicker();
 
   // Quyền thông báo trình duyệt
   document.getElementById('btnEnableBrowserNotif').addEventListener('click', async () => {

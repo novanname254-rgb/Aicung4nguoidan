@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/css/style.css?v=20261127h" />
+  <link rel="stylesheet" href="/css/style.css?v=20261127i" />
 
   <!-- Chart.js for Responsive Health & Productivity Analytics -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -1483,11 +1483,26 @@
 
   <!-- NOTIFICATION DROPDOWN POPUP -->
   <div class="modal-overlay" id="notifModal">
-    <div class="modal-content" style="max-width: 440px;">
+    <div class="modal-content notif-modal-content" style="max-width: 480px;">
       <div class="modal-header">
         <h3 data-i18n="remindersSettings">🔔 Lời Nhắc Thói Quen & Lịch Trình</h3>
         <button class="modal-close" id="notifModalClose">✕</button>
       </div>
+      <!-- Chọn công việc hôm nay cần nhắc + âm thanh -->
+      <div class="today-reminders" id="todayReminders">
+        <div class="today-reminders-head">
+          <strong>⏰ Nhắc việc hôm nay</strong>
+          <label class="inline-check"><input type="checkbox" id="todayRemindAll" /> Chọn tất cả</label>
+        </div>
+        <p class="muted-text today-reminders-hint">Tích vào công việc bạn muốn được nhắc khi đến giờ.</p>
+        <div id="todayRemindList" class="today-remind-list"></div>
+        <div class="today-remind-sound">
+          <label class="inline-check"><input type="checkbox" id="remindSoundToggle" checked /> 🔊 Nhắc kèm âm thanh (âm báo mặc định của điện thoại)</label>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnTestReminderSound">Thử âm báo</button>
+        </div>
+        <p class="muted-text today-reminders-hint" id="remindSoundNote"></p>
+      </div>
+      <h4 class="today-reminders-sub">Thông báo khác</h4>
       <div id="notifListContainer" style="display: flex; flex-direction: column; gap: 10px;">
         <!-- Injected via JS -->
       </div>
@@ -1498,9 +1513,9 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- SCRIPTS -->
-  <script src="/js/i18n.js?v=20261127h"></script>
-  <script src="/js/i18n-auto.js?v=20261127h"></script>
-  <script src="/js/app.js?v=20261127h"></script>
-  <script src="/js/planning-ui.js?v=20261127h"></script>
+  <script src="/js/i18n.js?v=20261127i"></script>
+  <script src="/js/i18n-auto.js?v=20261127i"></script>
+  <script src="/js/app.js?v=20261127i"></script>
+  <script src="/js/planning-ui.js?v=20261127i"></script>
 </body>
 </html>

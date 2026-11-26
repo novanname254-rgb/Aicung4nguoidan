@@ -1,12 +1,12 @@
-const CACHE_NAME = 'lifecare-cache-v11';
+const CACHE_NAME = 'lifecare-cache-v12';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/css/style.css?v=20261127h',
-  '/js/i18n.js?v=20261127h',
-  '/js/i18n-auto.js?v=20261127h',
-  '/js/app.js?v=20261127h',
-  '/js/planning-ui.js?v=20261127h',
+  '/css/style.css?v=20261127i',
+  '/js/i18n.js?v=20261127i',
+  '/js/i18n-auto.js?v=20261127i',
+  '/js/app.js?v=20261127i',
+  '/js/planning-ui.js?v=20261127i',
   '/manifest.json',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
@@ -59,5 +59,17 @@ self.addEventListener('fetch', (event) => {
           return cachedResponse || caches.match('/index.html');
         });
       })
+  );
+});
+
+// Bấm vào thông báo nhắc việc: mở lại (hoặc đưa lên trước) cửa sổ ứng dụng
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+      const win = wins.find((w) => 'focus' in w);
+      if (win) return win.focus();
+      return self.clients.openWindow('/');
+    })
   );
 });

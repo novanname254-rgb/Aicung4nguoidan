@@ -423,6 +423,11 @@
     ['Đóng', 'Close'],
     ['Huỷ', 'Cancel'],
     ['Hằng ngày', 'Daily'],
+    ['Nhắc việc hôm nay', 'Today\'s task reminders'],
+    ['Tích vào công việc bạn muốn được nhắc khi đến giờ.', 'Tick the tasks you want to be reminded about when they are due.'],
+    ['Nhắc kèm âm thanh (âm báo mặc định của điện thoại)', 'Play a sound (your phone\'s default notification sound)'],
+    ['Thử âm báo', 'Test sound'],
+    ['Thông báo khác', 'Other notifications'],
     ['Hằng tuần', 'Weekly'],
     ['Hằng tháng', 'Monthly'],
   ];
