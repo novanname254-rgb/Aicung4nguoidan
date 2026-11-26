@@ -1560,3 +1560,10 @@ button.month-day-cell { font: inherit; color: inherit; text-align: left; align-i
 @media (max-width: 768px) { .guest-banner { margin: 12px 12px 0; } }
 .guest-migrate-row { margin-bottom: 14px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--ok-bg); color: var(--ok); font-size: 0.84rem; line-height: 1.5; align-items: flex-start; }
 .guest-migrate-row input { margin-top: 3px; }
+.ai-retry-btn { align-self: flex-start; margin: -4px 0 8px; }
+
+/* Khung chat AI đang mở: dời thẻ nhắc việc sang trái khung chat (điện thoại: lên trên cùng) để không che ô nhập */
+#aiChatDrawer.active ~ #reminderStack { right: calc(24px + 380px + 16px); }
+@media (max-width: 1000px) {
+  #aiChatDrawer.active ~ #reminderStack { right: 12px; left: 12px; width: auto; bottom: auto; top: 76px; }
+}

@@ -104,6 +104,14 @@ Trợ lý AI chạy bằng mô hình ngôn ngữ thật qua Groq (`server/llm-as
 - **Tự thêm / sửa / xoá / đánh dấu hoàn thành công việc** trong Kế Hoạch khi người dùng yêu cầu; giao diện tự tải lại lịch.
 - Nhớ hội thoại (bảng `ai_chats`); tin nhắn có dấu hiệu khủng hoảng luôn được trả lời ngay bằng thông tin hỗ trợ khẩn cấp.
 
+**Giới hạn gói miễn phí của Groq:** khoảng 8.000 token/phút cho mỗi model. Để không bị báo "quá tải":
+- Ngữ cảnh gửi cho AI được viết gọn (một tin nhắn thường khoảng 2.700 token).
+- Khi model chính hết hạn mức, server tự chuyển sang `GROQ_FALLBACK_MODEL` (mặc định `openai/gpt-oss-20b`).
+- Khi cả hai cùng hết, server tự đợi đúng thời gian Groq yêu cầu (tối đa 12 giây mỗi lần) rồi thử lại.
+- Nếu vẫn không được, khung chat hiện nút "Thử lại".
+
+Muốn dùng nhiều hơn thì nâng Groq lên Dev Tier (trả phí).
+
 Biến môi trường: `GROQ_API_KEY` (bắt buộc để bật AI), `GROQ_MODEL` (mặc định `openai/gpt-oss-120b`), `APP_TIMEZONE` (mặc định `Asia/Ho_Chi_Minh`). Không có `GROQ_API_KEY` thì trợ lý dùng bộ luật trả lời cố định như trước.
 
 ### Prerequisites

@@ -1452,7 +1452,24 @@ async function sendAiMessage(userMsg, { intent = null } = {}) {
     });
 
     loadingBubble.remove();
-    appendChatBubble('assistant', res.reply);
+    const replyBubble = appendChatBubble('assistant', res.reply);
+
+    // Lỗi tạm thời (VD hết hạn mức Groq trong phút này): cho bấm "Thử lại" với đúng câu hỏi cũ.
+    if (res.type === 'error' && res.retryable) {
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.className = 'btn btn-secondary small ai-retry-btn';
+      retryBtn.textContent = L('↻ Thử lại', '↻ Retry');
+      retryBtn.addEventListener('click', () => {
+        retryBtn.disabled = true;
+        replyBubble.remove();
+        retryBtn.remove();
+        msgArea.querySelectorAll('.chat-msg.user').forEach((b, i, all) => { if (i === all.length - 1) b.remove(); });
+        sendAiMessage(userMsg, { intent });
+      });
+      msgArea.appendChild(retryBtn);
+      msgArea.scrollTop = msgArea.scrollHeight;
+    }
 
     // Trợ lý AI đã tự thay đổi dữ liệu: báo và tải lại màn hình đang mở.
     const c = res.tasksChanged;

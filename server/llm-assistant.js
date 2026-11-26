@@ -14,8 +14,14 @@ const P = require('./planning');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+// Groq tính hạn mức token/phút RIÊNG cho từng model: hết hạn mức ở model chính thì chuyển sang model này.
+// Đặt GROQ_FALLBACK_MODEL=none để tắt.
+const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL === 'none' ? null : (process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b');
+const RETRY_BUDGET_MS = 25000;   // tổng thời gian tối đa chờ hạn mức trong một tin nhắn
+const MAX_SINGLE_WAIT_MS = 12000; // Groq bắt chờ lâu hơn mức này thì báo ngay để người dùng bấm "Thử lại"
 const MAX_TOOL_TURNS = 8;
-const HISTORY_LIMIT = 20;
+const HISTORY_LIMIT = 10;      // số tin nhắn cũ gửi kèm
+const HISTORY_MSG_CHARS = 1200; // cắt bớt tin nhắn cũ quá dài
 
 const CATEGORIES = ['Study', 'Work', 'Exercise', 'Personal', 'Rest', 'Other'];
 const PRIORITIES = ['low', 'medium', 'high'];
@@ -28,43 +34,36 @@ const MODE_HINTS = {
 };
 
 const INTENT_HINTS = {
-  daily_adjust: `The user just did today's quick state check-in. Compare today's check-in with their fixed baseline (psych_profile) and recent days. Adjust TODAY's plan only slightly: e.g. on a low-energy or high-stress day shorten or move one demanding task, add a short break, or swap order so the hardest work lands at their best time; on a strong day you may pull one small task forward. Do not rebuild the schedule. If nothing needs to change, say so in one or two sentences. Keep the reply short and encouraging.`,
-  disruption: `The user just declared a schedule disruption (it is already saved in <app_state>.disruptions). Find the pending tasks it affects. Re-plan them by weighing priority, deadline and how much time is left: use find_free_slots before the relevant deadline, keep high-priority / near-deadline work, shorten or split long tasks, move low-priority work further out or suggest dropping it. Do NOT simply push everything to tomorrow, and do not overload any single day. Then explain briefly what moved where and why.`,
-  goal_breakdown: `The user wants a big goal broken down. If the goal is not created yet, call create_goal first. Split it into concrete tasks with a realistic duration (duration_minutes), priority and a per-task deadline, ordered sensibly, then place them into free time with find_free_slots before the goal's deadline (prefer "study_block" slots for study work and the user's best focus time). Respect the user's max focus length from psych_profile. If the total does not fit before the deadline, say so clearly and propose options (extend deadline, reduce scope).`,
-  allocate_free_time: `The user wants their free time allocated. Use find_free_slots for the requested range (default: rest of this week), then fill a reasonable share of it (not all of it) with work toward their active goals and habits, respecting energy, best focus time and breaks.`,
-  behind_schedule: `The user says they are behind schedule or late on something. Look at overdue and pending tasks and goal forecasts. Adjust only what is needed (do not recreate the whole plan): re-slot missed tasks by priority and deadline, shrink or drop low-value items, and tell them honestly whether the deadline is still realistic.`
+  daily_adjust: `The user just did today's quick check-in. Compare it with their psych baseline and recent days and adjust TODAY slightly (shorten or move one hard task, add a break, reorder; on a strong day pull one small task forward). Don't rebuild the schedule; if nothing needs changing say so briefly. Short and encouraging.`,
+  disruption: `The user just declared a disruption (already saved). Re-plan the affected pending tasks by priority, deadline and time left: find free slots before each deadline, keep urgent/high-priority work, shorten or split long tasks, push or drop low-priority ones. Do NOT just move everything to tomorrow or overload one day. Explain briefly what moved and why.`,
+  goal_breakdown: `Break the goal into concrete tasks (create_goal first if it doesn't exist) with duration_minutes, priority and deadline, in a sensible order, placed with find_free_slots before the goal deadline (prefer study slots and the best focus time, respect max focus minutes). If it doesn't fit, say so and propose options.`,
+  allocate_free_time: `Allocate the user's free time in the given range (default rest of this week) with find_free_slots: fill a reasonable share, not all, with work toward active goals and habits, respecting energy, focus time and breaks.`,
+  behind_schedule: `The user is behind. Using overdue/pending tasks and goal forecasts, adjust only what's needed (no full rebuild): re-slot missed tasks by priority and deadline, shrink or drop low-value items, and say honestly whether the deadline is still realistic.`
 };
 
-const SYSTEM_PROMPT = `You are the AI assistant inside LifeCare, a web app where people plan their days and track their physical and emotional wellbeing.
+const SYSTEM_PROMPT = `You are the AI assistant in LifeCare, an app for planning days and tracking physical and emotional wellbeing.
 
-What you can see and do:
-- Each request includes an <app_state> block: today's date/time and timezone, the user's profile and fixed psychological baseline (psych_profile: willpower, motivation source, stress tolerance, best focus time, max focus minutes), their fixed weekly time blocks (routine_blocks: sleep, meal, school, extra_class, leisure, exercise, study; they repeat every week on the listed days), tasks from 7 days ago to 14 days ahead (with ids), goals with progress, forecast and feasibility, upcoming disruptions, today's check-in and recent health / mood check-ins. The user does not see this block.
-- Tools: list_tasks (other date ranges), find_free_slots (time outside the fixed blocks, minus tasks and disruptions; "study_block" slots are free time inside the user's study blocks), add_tasks, update_task (also to mark completed or reschedule), delete_task, create_goal, update_goal, log_progress (record extra work the user did beyond the plan), add_disruption.
-- Only change data when the user asks for it or clearly agrees, or when the request's purpose (given below) implies it. If a request is ambiguous, ask first. Never invent ids.
-- Task fields: date YYYY-MM-DD, start_time/end_time HH:MM (24h), duration_minutes, deadline YYYY-MM-DD, goal_id, category one of Study, Work, Exercise, Personal, Rest, Other, priority one of low, medium, high.
+Context: each request starts with a compact <app_state> (hidden from the user): today, profile, fixed psychological baseline (psych), weekly time blocks (repeat every week), tasks for -2..+7 days as "id|date|time|title|category|priority|status|duration|deadline|goal", goals with progress/forecast/feasibility, disruptions, recent health and mood.
 
-How to plan:
-- Never put tasks on top of fixed time blocks (except study work inside "study" blocks), existing tasks or disruptions; get free time from find_free_slots.
-- Shape the plan around the person: hardest work at their best focus time, sessions no longer than their max focus minutes, breaks between sessions, enough sleep. If recent check-ins show poor sleep, high stress or low mood, lighten the load and say why.
-- Be honest about feasibility: if a goal does not fit before its deadline, say so and offer options instead of cramming.
-- After changing data, briefly say what you changed and why; do not repeat the whole schedule.
-- Ground insights in the actual numbers from <app_state>.
+Tools: list_tasks, find_free_slots ("study" = free time inside study blocks), add_tasks, update_task, delete_task, create_goal, update_goal, log_progress, add_disruption. Change data only when the user asks or clearly agrees (or the stated purpose implies it); ask if unclear. Never invent ids. Dates YYYY-MM-DD, times HH:MM 24h; categories Study, Work, Exercise, Personal, Rest, Other; priority low/medium/high.
 
-Style: reply in the user's language (Vietnamese by default; see the language field). Warm, direct, concise. Plain text with short paragraphs or "- " lists. You may use **bold** for a few key words; no headings, tables or other markdown, because the app shows only plain text and bold.
+Planning rules: never place tasks over time blocks (study work may go in study blocks), other tasks or disruptions; get free time from find_free_slots. Put hard work at the user's best focus time, keep sessions within their max focus minutes, add breaks, protect sleep. Lighten the load after poor sleep, high stress or low mood and say why. Be honest when something won't fit before its deadline and offer options. After changes, say briefly what changed and why; don't repeat the whole schedule. Base insights on the real numbers.
 
-Limits: you are not a doctor or therapist. Give general wellbeing guidance only and never diagnose or prescribe. Suggest seeing a professional for persistent or serious physical or mental health problems. If the user expresses thoughts of self-harm or seems to be in crisis, respond with care, put planning aside, and urge them to contact someone they trust or local emergency services (115 in Vietnam) right away.`;
+Style: the user's language (Vietnamese by default). Warm, direct, concise; plain text, short paragraphs or "- " lists, **bold** allowed sparingly, no headings or tables.
+
+Limits: not a doctor or therapist; general wellbeing advice only, no diagnosis or prescriptions; suggest a professional for persistent or serious problems. If the user mentions self-harm or seems in crisis, respond with care, set planning aside and urge them to contact someone they trust or emergency services (115 in Vietnam) now.`;
 
 const TASK_PROPS = {
   title: { type: 'string' },
-  date: { type: 'string', description: 'YYYY-MM-DD' },
-  start_time: { type: 'string', description: 'HH:MM 24h; omit for all-day' },
-  end_time: { type: 'string', description: 'HH:MM 24h; omit for all-day' },
-  duration_minutes: { type: 'integer', description: 'Planned effort in minutes' },
-  deadline: { type: 'string', description: 'YYYY-MM-DD; latest date this task must be done' },
-  goal_id: { type: 'string', description: 'Id of the goal this task belongs to' },
+  date: { type: 'string' },
+  start_time: { type: 'string' },
+  end_time: { type: 'string' },
+  duration_minutes: { type: 'integer' },
+  deadline: { type: 'string' },
+  goal_id: { type: 'string' },
   category: { type: 'string', enum: CATEGORIES },
   priority: { type: 'string', enum: PRIORITIES },
-  description: { type: 'string', description: 'Short tip or detail; may be empty.' }
+  description: { type: 'string' }
 };
 
 const fn = (name, description, properties, required = []) => ({
@@ -75,26 +74,26 @@ const fn = (name, description, properties, required = []) => ({
 const TOOLS = [
   fn('list_tasks', "List the user's tasks between two dates (inclusive), with ids.",
     { start_date: { type: 'string' }, end_date: { type: 'string' } }, ['start_date', 'end_date']),
-  fn('find_free_slots', 'Free time between two dates (inclusive), outside fixed time blocks and existing tasks/disruptions. Past time today is excluded.',
-    { start_date: { type: 'string' }, end_date: { type: 'string' }, min_minutes: { type: 'integer', description: 'Ignore slots shorter than this (default 30)' } },
+  fn('find_free_slots', 'Free time between two dates (inclusive), outside time blocks, tasks and disruptions.',
+    { start_date: { type: 'string' }, end_date: { type: 'string' }, min_minutes: { type: 'integer' } },
     ['start_date', 'end_date']),
   fn('add_tasks', "Add one or more tasks to the user's planner.",
     { tasks: { type: 'array', items: { type: 'object', properties: TASK_PROPS, required: ['title', 'date', 'category'] } } }, ['tasks']),
-  fn('update_task', 'Change fields of an existing task. Only pass the fields to change. Use status "completed" to tick a task off.',
+  fn('update_task', 'Change only the given fields of a task (status "completed" ticks it off).',
     { id: { type: 'string' }, ...TASK_PROPS, status: { type: 'string', enum: STATUSES } }, ['id']),
   fn('delete_task', 'Delete a task from the planner.', { id: { type: 'string' } }, ['id']),
-  fn('create_goal', 'Create a big goal to break down into tasks. Returns its id.', {
-    title: { type: 'string' }, description: { type: 'string' }, deadline: { type: 'string', description: 'YYYY-MM-DD' },
-    estimated_minutes: { type: 'integer', description: 'Total effort the goal needs' }, priority: { type: 'string', enum: PRIORITIES }
+  fn('create_goal', 'Create a big goal; returns its id.', {
+    title: { type: 'string' }, description: { type: 'string' }, deadline: { type: 'string' },
+    estimated_minutes: { type: 'integer' }, priority: { type: 'string', enum: PRIORITIES }
   }, ['title']),
-  fn('update_goal', 'Change a goal (deadline, estimate, priority, status active/paused/done).', {
+  fn('update_goal', 'Change a goal.', {
     id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, deadline: { type: 'string' },
     estimated_minutes: { type: 'integer' }, priority: { type: 'string', enum: PRIORITIES }, status: { type: 'string', enum: ['active', 'paused', 'done'] }
   }, ['id']),
-  fn('log_progress', 'Record work the user did (e.g. extra study beyond the plan) toward a goal.', {
-    goal_id: { type: 'string' }, minutes: { type: 'integer' }, date: { type: 'string', description: 'YYYY-MM-DD, default today' }, note: { type: 'string' }
+  fn('log_progress', 'Record extra work the user did toward a goal (date defaults to today).', {
+    goal_id: { type: 'string' }, minutes: { type: 'integer' }, date: { type: 'string' }, note: { type: 'string' }
   }, ['minutes']),
-  fn('add_disruption', 'Record a disruption: incident, class_off (class cancelled), new_work (unexpected work) or unavailable time. Omit times for the whole day.', {
+  fn('add_disruption', 'Record a disruption; omit times for the whole day.', {
     kind: { type: 'string', enum: P.DISRUPTION_KINDS }, date: { type: 'string' }, start_time: { type: 'string' }, end_time: { type: 'string' }, note: { type: 'string' }
   }, ['kind', 'date'])
 ];
@@ -156,11 +155,9 @@ function cleanTaskFields(raw, partial) {
   return [out, null];
 }
 
-const taskView = t => Object.fromEntries(Object.entries({
-  id: t.id, date: t.date, start_time: t.start_time, end_time: t.end_time, title: t.title, category: t.category,
-  priority: t.priority, status: t.status, duration_minutes: t.duration_minutes, deadline: t.deadline, goal_id: t.goal_id,
-  description: t.description
-}).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+// Một công việc trên một dòng: id|ngày|giờ|tiêu đề|loại|ưu tiên|trạng thái|thời lượng|hạn|mục tiêu
+const taskLine = t => [t.id, t.date, t.start_time ? `${t.start_time}-${t.end_time || ''}` : 'allday', t.title, t.category, t.priority,
+  t.status === 'completed' ? 'done' : 'todo', t.duration_minutes ? `${t.duration_minutes}m` : '', t.deadline || '', t.goal_id || ''].join('|').replace(/\|+$/, '');
 
 // ---------------------------------------------------------------- thực thi tool
 async function runTool(db, user, name, argsText, changes, tz) {
@@ -176,16 +173,18 @@ async function runTool(db, user, name, argsText, changes, tz) {
 
   if (name === 'list_tasks') {
     if (!P.isRealDate(args.start_date) || !P.isRealDate(args.end_date)) return 'Error: start_date and end_date must be YYYY-MM-DD.';
-    const rows = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, start_time ASC LIMIT 200')
+    const rows = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, start_time ASC LIMIT 80')
       .all(userId, args.start_date, args.end_date);
-    return JSON.stringify(rows.map(taskView));
+    return rows.length ? rows.map(taskLine).join('\n') : 'No tasks.';
   }
 
   if (name === 'find_free_slots') {
     if (!P.isRealDate(args.start_date) || !P.isRealDate(args.end_date)) return 'Error: start_date and end_date must be YYYY-MM-DD.';
     if (P.daysBetween(args.start_date, args.end_date) > 62) return 'Error: range must be at most 62 days.';
     const slots = await P.findFreeSlots(db, userId, args.start_date, args.end_date, { minMinutes: positiveInt(args.min_minutes, 600) || 30, tz });
-    return JSON.stringify(slots.slice(0, 150));
+    // Gọn để tiết kiệm token: "ngày start-end phút loại"
+    const lines = slots.slice(0, 60).map(f => `${f.date} ${f.start}-${f.end} ${f.minutes}m${f.kind === 'study_block' ? ' study' : ''}`);
+    return lines.length ? lines.join('\n') + (slots.length > 60 ? `\n(+${slots.length - 60} more; narrow the range)` : '') : 'No free slots.';
   }
 
   if (name === 'add_tasks') {
@@ -214,7 +213,7 @@ async function runTool(db, user, name, argsText, changes, tz) {
       created.push({ id, date: t.date, start_time: t.start_time || null, title: t.title });
     }
     changes.added += created.length;
-    return `Added ${created.length} tasks: ${JSON.stringify(created)}`;
+    return `Added ${created.length}: ` + created.map(c => `${c.id} ${c.date} ${c.start_time || ''} ${c.title}`).join('; ');
   }
 
   if (name === 'update_task') {
@@ -232,7 +231,7 @@ async function runTool(db, user, name, argsText, changes, tz) {
       .run(...keys.map(k => fields[k]), now, id, userId);
     if ('status' in fields || 'goal_id' in fields) await P.syncTaskProgress(db, userId, merged, tz);
     changes.updated += 1;
-    return `Updated: ${JSON.stringify(taskView(merged))}`;
+    return `Updated: ${taskLine(merged)}`;
   }
 
   if (name === 'delete_task') {
@@ -329,59 +328,91 @@ function parseJSON(text) {
 
 async function buildAppState(db, user, language, tz) {
   const now = P.localNow(tz);
-  const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, start_time ASC LIMIT 150')
-    .all(user.id, P.addDays(now.date, -7), P.addDays(now.date, 14));
+  const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, start_time ASC LIMIT 80')
+    .all(user.id, P.addDays(now.date, -2), P.addDays(now.date, 7));
   const blocks = await db.prepare('SELECT block_type, label, start_time, end_time, days FROM routine_blocks WHERE user_id = ? ORDER BY start_time').all(user.id);
-  const disruptions = await db.prepare('SELECT kind, date, start_time, end_time, note FROM disruptions WHERE user_id = ? AND date >= ? ORDER BY date LIMIT 30')
-    .all(user.id, P.addDays(now.date, -1));
+  const disruptions = await db.prepare('SELECT kind, date, start_time, end_time, note FROM disruptions WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date LIMIT 15')
+    .all(user.id, P.addDays(now.date, -1), P.addDays(now.date, 14));
   const goals = await P.goalsWithProgress(db, user.id, tz, { includeDone: false });
-  const health = await db.prepare(`SELECT checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level,
-      exercise_status, exercise_type, exercise_duration, water_ml, discomfort, notes
-    FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7`).all(user.id);
-  const mood = await db.prepare(`SELECT checkin_date, mood, stress_level, motivation_level, anxiety_score, relaxed_score, emotional_notes
-    FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7`).all(user.id);
-  const drop = rows => rows.map(r => Object.fromEntries(Object.entries(r).filter(([, v]) => v !== null && v !== '')));
-  return {
-    today: now.date, weekday: now.weekday, time_now: now.time, timezone: now.timezone, language,
-    profile: { name: user.full_name, dob: user.dob || null, goals: user.personal_goals || null },
-    psych_profile: parseJSON(user.psych_profile),
-    routine_blocks: blocks,
-    tasks: tasks.map(taskView),
-    goals: goals.map(g => ({
-      id: g.id, title: g.title, deadline: g.deadline, priority: g.priority, status: g.status, estimated_minutes: g.estimated_minutes,
-      progress_percent: g.progress.percent, done_minutes: g.progress.done_minutes, remaining_minutes: g.progress.remaining_minutes,
-      scheduled_minutes_ahead: g.progress.scheduled_minutes_ahead, forecast: g.progress.forecast, feasibility: g.progress.feasibility
-    })),
-    disruptions,
-    today_checkin: {
-      health: drop(health.filter(h => h.checkin_date === now.date))[0] || null,
-      mood: drop(mood.filter(m => m.checkin_date === now.date))[0] || null
-    },
-    recent_health_checkins: drop(health),
-    recent_mood_checkins: drop(mood)
-  };
+  const health = await db.prepare(`SELECT checkin_date, sleep_duration, sleep_quality, energy_level, exercise_duration, water_ml, discomfort
+    FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 5`).all(user.id);
+  const mood = await db.prepare(`SELECT checkin_date, mood, stress_level, motivation_level, emotional_notes
+    FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 5`).all(user.id);
+  const daysText = d => (d === 'mon,tue,wed,thu,fri,sat,sun' ? 'every day' : d === 'mon,tue,wed,thu,fri' ? 'mon-fri' : d);
+  const psych = parseJSON(user.psych_profile);
+  return [
+    `today: ${now.date} (${now.weekday}) ${now.time} ${now.timezone}; reply language: ${language}`,
+    `profile: ${user.full_name}${user.personal_goals ? '; goals: ' + String(user.personal_goals).slice(0, 200) : ''}`,
+    psych ? `psych: ${Object.entries(psych).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${v}`).join(', ')}` : 'psych: not set',
+    `blocks:\n${blocks.map(b => `${b.block_type}${b.label ? ` "${b.label}"` : ''} ${b.start_time}-${b.end_time} ${daysText(b.days)}`).join('\n') || 'none'}`,
+    `tasks (id|date|time|title|category|priority|status|duration|deadline|goal):\n${tasks.map(taskLine).join('\n') || 'none'}`,
+    `goals:\n${goals.map(g => `${g.id} "${g.title}" deadline ${g.deadline || '-'} ${g.priority}; ${g.progress.percent}% (${g.progress.done_minutes}/${g.progress.planned_minutes}m), scheduled ahead ${g.progress.scheduled_minutes_ahead}m, forecast ${g.progress.forecast.projected_date || '-'}${g.progress.forecast.days_vs_deadline != null ? ` (${g.progress.forecast.days_vs_deadline} days vs deadline)` : ''}; feasibility ${g.progress.feasibility.level}`).join('\n') || 'none'}`,
+    `disruptions:\n${disruptions.map(x => `${x.date} ${x.start_time ? `${x.start_time}-${x.end_time}` : 'all day'} ${x.kind}${x.note ? ': ' + String(x.note).slice(0, 120) : ''}`).join('\n') || 'none'}`,
+    `health (date sleep quality energy exercise water):\n${health.map(h => `${h.checkin_date} ${h.sleep_duration ?? '-'}h ${h.sleep_quality || '-'} e${h.energy_level ?? '-'} ex${h.exercise_duration || 0}m ${h.water_ml ?? '-'}ml${h.discomfort ? ' pain:' + String(h.discomfort).slice(0, 60) : ''}`).join('\n') || 'none'}`,
+    `mood (date mood stress motivation):\n${mood.map(m => `${m.checkin_date} ${m.mood} s${m.stress_level ?? '-'} m${m.motivation_level ?? '-'}${m.emotional_notes ? ' "' + String(m.emotional_notes).slice(0, 80) + '"' : ''}`).join('\n') || 'none'}`
+  ].join('\n');
 }
 
-async function callGroq(messages) {
+async function callGroq(messages, model) {
   const res = await fetch(GROQ_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 8000 }),
+    body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 4000 }),
     signal: AbortSignal.timeout(50000)
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    const err = new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
+    const err = new Error(`Groq HTTP ${res.status} (${model}): ${detail.slice(0, 300)}`);
     err.status = res.status;
+    // Groq cho biết cần đợi bao lâu: header retry-after hoặc "try again in 10.095s" trong nội dung
+    const header = Number(res.headers?.get?.('retry-after'));
+    const m = detail.match(/try again in ([\d.]+)(ms|s)/i);
+    err.retryAfterMs = header > 0 ? header * 1000 : m ? Number(m[1]) * (m[2].toLowerCase() === 'ms' ? 1 : 1000) : 5000;
     throw err;
   }
   return res.json();
 }
 
+/**
+ * Gọi Groq, tự xử lý giới hạn token/phút (429): chuyển sang model dự phòng, hoặc đợi đúng thời gian
+ * Groq yêu cầu rồi thử lại, trong giới hạn RETRY_BUDGET_MS cho cả tin nhắn.
+ */
+async function callGroqResilient(messages, ctx) {
+  for (;;) {
+    try {
+      return await callGroq(messages, ctx.model);
+    } catch (err) {
+      if (err.status !== 429) throw err;
+      if (ctx.model !== FALLBACK_MODEL && FALLBACK_MODEL && !ctx.triedFallback) {
+        console.warn(`[LifeCare AI] ${ctx.model} hết hạn mức, chuyển sang ${FALLBACK_MODEL}`);
+        ctx.triedFallback = true;
+        ctx.primaryBlockedUntil = Date.now() + err.retryAfterMs;
+        ctx.model = FALLBACK_MODEL;
+        continue;
+      }
+      // Cả hai model đều hết hạn mức: đợi model nào hồi sớm hơn
+      const waitPrimary = ctx.primaryBlockedUntil ? Math.max(0, ctx.primaryBlockedUntil - Date.now()) : Infinity;
+      const wait = Math.min(err.retryAfterMs, waitPrimary) + 300;
+      if (wait > MAX_SINGLE_WAIT_MS || Date.now() - ctx.startedAt + wait > RETRY_BUDGET_MS) {
+        err.retryAfterMs = wait;
+        throw err;
+      }
+      if (waitPrimary < err.retryAfterMs) ctx.model = MODEL;
+      console.warn(`[LifeCare AI] Hết hạn mức token, đợi ${Math.round(wait / 100) / 10}s rồi thử lại (${ctx.model})`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+}
+
 function describeError(err, language) {
   const vi = language !== 'en';
   if (err.status === 401) return vi ? 'API key của trợ lý AI không hợp lệ. Kiểm tra GROQ_API_KEY trên server.' : 'The AI API key is invalid. Check GROQ_API_KEY on the server.';
-  if (err.status === 429) return vi ? 'Trợ lý AI đang quá tải, chờ một chút rồi thử lại nhé.' : 'The AI is rate-limited right now, please try again shortly.';
+  if (err.status === 429) {
+    const sec = Math.max(5, Math.ceil((err.retryAfterMs || 10000) / 1000));
+    return vi
+      ? `Trợ lý AI đang hết lượt dùng miễn phí trong phút này (giới hạn của Groq). Mình đã tự đợi và thử lại nhưng chưa được. Bấm "Thử lại" sau khoảng ${sec} giây nhé.`
+      : `The AI hit Groq's free per-minute limit; automatic retries didn't succeed. Press "Retry" in about ${sec} seconds.`;
+  }
   if (err.name === 'TimeoutError') return vi ? 'Trợ lý AI phản hồi quá lâu, thử gửi lại nhé.' : 'The AI took too long to respond, please try again.';
   return vi ? 'Trợ lý AI đang gặp sự cố, thử lại sau ít phút nhé.' : 'The AI assistant hit a problem, please try again in a moment.';
 }
@@ -405,14 +436,15 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
   if (INTENT_HINTS[intent]) system += `\n\nPurpose of this request: ${INTENT_HINTS[intent]}`;
   const messages = [
     { role: 'system', content: system },
-    ...past.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.message).slice(0, 8000) })),
-    { role: 'user', content: `<app_state>\n${JSON.stringify(appState)}\n</app_state>\n\n${userMessage.slice(0, 8000)}` }
+    ...past.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.message).slice(0, HISTORY_MSG_CHARS) })),
+    { role: 'user', content: `<app_state>\n${appState}\n</app_state>\n\n${userMessage.slice(0, 4000)}` }
   ];
 
+  const ctx = { model: MODEL, startedAt: Date.now(), triedFallback: false, primaryBlockedUntil: 0 };
   try {
     let reply = '';
     for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-      const data = await callGroq(messages);
+      const data = await callGroqResilient(messages, ctx);
       const msg = data.choices?.[0]?.message || {};
       if (msg.content) reply += (reply ? '\n\n' : '') + msg.content.trim();
       const calls = msg.tool_calls || [];
@@ -430,7 +462,7 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
   } catch (err) {
     console.error('[LifeCare AI] Groq call failed:', err.message);
     // Có thể đã đổi một phần dữ liệu trước khi lỗi: vẫn báo để giao diện tải lại.
-    return { reply: describeError(err, language), type: 'error', tasksChanged: changes };
+    return { reply: describeError(err, language), type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
   }
 }
 

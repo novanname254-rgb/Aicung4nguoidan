@@ -1077,8 +1077,11 @@ async function routeRequest(req, res) {
           aiResult = await generateAIWellnessReply(userMessage, { user, recentHealth, recentMood, tasks, mode, language });
         }
 
-        // Thông báo lỗi không lưu vào lịch sử, để lượt sau model không đọc nhầm nó là câu trả lời.
-        if (aiResult.type !== 'error') {
+        // Thông báo lỗi không lưu vào lịch sử, để lượt sau model không đọc nhầm nó là câu trả lời;
+        // câu hỏi bị lỗi cũng bỏ ra, để người dùng bấm "Thử lại" không bị trùng tin nhắn.
+        if (aiResult.type === 'error') {
+          await db.prepare('DELETE FROM ai_chats WHERE id = ? AND user_id = ?').run(userChatId, user.id);
+        } else {
           const aiChatId = 'chat_' + crypto.randomUUID();
           await db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
             aiChatId, user.id, 'assistant', aiResult.reply, new Date().toISOString()
@@ -1090,7 +1093,8 @@ async function routeRequest(req, res) {
           reply: aiResult.reply,
           type: aiResult.type,
           suggestedTasks: aiResult.suggestedTasks || [],
-          tasksChanged: aiResult.tasksChanged || null
+          tasksChanged: aiResult.tasksChanged || null,
+          retryable: Boolean(aiResult.retryable)
         });
       }
 
