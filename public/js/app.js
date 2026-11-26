@@ -84,6 +84,19 @@ function applyLanguage(lang) {
   else if (AppState.activeView === 'settings') loadSettings();
 }
 
+/** Vừa đăng nhập bằng mật khẩu tạm (gửi qua email): mở Cài đặt, điền sẵn mật khẩu hiện tại để đổi ngay. */
+function promptChangeTempPassword(tempPassword) {
+  setTimeout(() => {
+    navigateToView('settings');
+    const cur = document.getElementById('curPassword');
+    if (cur) cur.value = tempPassword;
+    const form = document.getElementById('changePasswordForm');
+    form?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => document.getElementById('newPassword')?.focus(), 400);
+    showToast(L('Bạn vừa đăng nhập bằng mật khẩu tạm thời. Hãy đặt mật khẩu mới ngay.', 'You signed in with a temporary password. Please set a new password now.'));
+  }, 600);
+}
+
 // API Helper
 async function apiRequest(endpoint, options = {}) {
   const headers = {
@@ -410,6 +423,7 @@ function bindAuthEvents() {
       await endGuestSessionIfAny();
       onSignedIn(res.user, res.token);
       showToast(`${t('greetingMorning')}, ${res.user.full_name}!`);
+      if (res.mustChangePassword) promptChangeTempPassword(password);
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -444,6 +458,8 @@ function bindAuthEvents() {
 
   forgotForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const submitBtn = forgotForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
     try {
       const email = document.getElementById('forgotEmail').value;
       const res = await apiRequest('/api/auth/forgot-password', {
@@ -451,9 +467,13 @@ function bindAuthEvents() {
         body: JSON.stringify({ email })
       });
       showToast(res.message);
+      const loginEmail = document.getElementById('loginEmail');
+      if (loginEmail) loginEmail.value = email;
       document.getElementById('backToLoginLink').click();
     } catch (err) {
       showToast(err.message, 'error');
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 
@@ -1678,25 +1698,10 @@ function bindSettings() {
     }
   });
 
+  // Bảng 🔔: chọn việc cần nhắc hôm nay + âm báo (vẽ trong planning-ui.js)
   const notifModal = document.getElementById('notifModal');
-  document.getElementById('notifBellBtn').addEventListener('click', async () => {
+  document.getElementById('notifBellBtn').addEventListener('click', () => {
     notifModal.classList.add('active');
-    try {
-      const res = await apiRequest('/api/notifications');
-      const container = document.getElementById('notifListContainer');
-      const notifs = res.notifications || [];
-      if (notifs.length === 0) {
-        container.innerHTML = `<p style="color: var(--text-muted); font-size: 0.85rem;">${AppState.language === 'vi' ? 'Không có thông báo mới.' : 'No new notifications.'}</p>`;
-        return;
-      }
-      container.innerHTML = notifs.map(n => `
-        <div style="background: var(--bg-main); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-          <div style="font-weight: 700; color: var(--text-heading); font-size: 0.88rem;">${escapeHTML(n.title)}</div>
-          <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 2px;">${escapeHTML(n.message)}</div>
-          <div style="font-size: 0.72rem; color: var(--primary); margin-top: 4px;">⏰ ${n.notification_time}</div>
-        </div>
-      `).join('');
-    } catch (e) {}
   });
 
   document.getElementById('notifModalClose').addEventListener('click', () => {

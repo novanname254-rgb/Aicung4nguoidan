@@ -9,6 +9,7 @@ const P = require('./server/planning');
 const { ensureDemoUser, createGuestUser, isGuestId, createSession, getUserFromSession, deleteSession } = require('./server/auth');
 const { checkCrisisOrEmergency, generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
 const { generateLLMReply, isLLMConfigured } = require('./server/llm-assistant');
+const { isMailConfigured, sendMail, tempPasswordEmail } = require('./server/mailer');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -185,6 +186,9 @@ async function ensureServerInit() {
   if (_serverInitialized) return;
   await initDatabase();
   await ensureDemoUser();
+  // Bảng "Thông báo khác" (thông báo mẫu, nhắc tạo kèm công việc) đã bỏ: nhắc việc nay chạy theo lịch hôm nay.
+  // Xoá các thông báo cũ còn sót để không còn đếm "chưa đọc".
+  await getDb().prepare('DELETE FROM notifications').run();
   if (getDb().isDirty()) await getDb().persist();
   _serverInitialized = true;
 }
@@ -294,7 +298,24 @@ async function routeRequest(req, res) {
 
         const cleanEmail = email.trim().toLowerCase();
         const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
-        if (!user || !verifyPassword(password, user.password_hash, user.salt)) {
+        let usedTempPassword = false;
+        if (user && !verifyPassword(password, user.password_hash, user.salt)) {
+          // Thử mật khẩu tạm thời (gửi qua email khi quên mật khẩu)
+          const temps = await db.prepare("SELECT token, expires_at FROM password_resets WHERE user_id = ? AND token LIKE 'tmp$%'").all(user.id);
+          const hit = temps.find(r => {
+            if (Date.now() > r.expires_at) return false;
+            const [, salt, hash] = r.token.split('$');
+            return verifyPassword(password, hash, salt);
+          });
+          if (hit) {
+            // Mật khẩu tạm trở thành mật khẩu chính; người dùng được nhắc đổi ngay
+            const [, salt, hash] = hit.token.split('$');
+            await db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(hash, salt, new Date().toISOString(), user.id);
+            await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
+            usedTempPassword = true;
+          }
+        }
+        if (!user || (!usedTempPassword && !verifyPassword(password, user.password_hash, user.salt))) {
           return sendJSON(res, 401, { success: false, message: 'Invalid email or password.' });
         }
 
@@ -317,7 +338,8 @@ async function routeRequest(req, res) {
           success: true,
           message: `Welcome back, ${safeUser.full_name}!`,
           token,
-          user: safeUser
+          user: safeUser,
+          mustChangePassword: usedTempPassword
         });
       }
 
@@ -345,50 +367,46 @@ async function routeRequest(req, res) {
       }
 
       // POST /api/auth/forgot-password
+      // Mật khẩu chỉ lưu dạng băm nên không ai (kể cả server) biết được mật khẩu cũ.
+      // Thay vào đó: tạo một mật khẩu tạm thời ngẫu nhiên, gửi tới email đã đăng ký, dùng được 30 phút.
+      // Mật khẩu cũ vẫn dùng được cho tới khi người dùng đăng nhập bằng mật khẩu tạm, nên người khác
+      // nhập email của bạn cũng không khoá được tài khoản của bạn.
       if (pathname === '/api/auth/forgot-password' && method === 'POST') {
+        const T = (vi, en) => (lang === 'en' ? en : vi);
         const body = await parseBody(req);
-        const { email } = body;
-        if (!email) return sendJSON(res, 400, { success: false, message: 'Email is required.' });
-
-        const user = await db.prepare('SELECT id, full_name FROM users WHERE email = ?').get(email.trim().toLowerCase());
-        if (!user) {
-          // Standard security response: don't reveal email existence
-          return sendJSON(res, 200, { success: true, message: 'If this email exists in our records, password reset instructions have been generated.' });
+        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+        if (!email) return sendJSON(res, 400, { success: false, message: T('Vui lòng nhập email.', 'Email is required.') });
+        if (!isMailConfigured()) {
+          return sendJSON(res, 503, { success: false, message: T('Chức năng gửi email chưa được cấu hình trên máy chủ. Vui lòng liên hệ quản trị viên.', 'Sending email is not set up on the server yet. Please contact the administrator.') });
         }
+        // Luôn trả cùng một câu, không để lộ email nào đã đăng ký
+        const generic = { success: true, message: T('Nếu email này đã đăng ký, mật khẩu tạm thời đã được gửi tới hộp thư (nhớ xem cả mục Spam). Mật khẩu dùng được trong 30 phút.', 'If this email is registered, a temporary password has been sent to it (check Spam too). It works for 30 minutes.') };
 
-        const resetToken = 'rst_' + crypto.randomBytes(24).toString('hex');
-        const expiresAt = Date.now() + 60 * 60 * 1000; // 1 hour
-        await db.prepare('INSERT INTO password_resets (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)').run(
-          resetToken, user.id, expiresAt, new Date().toISOString()
-        );
+        const user = await db.prepare('SELECT id, full_name, email FROM users WHERE email = ?').get(email);
+        if (!user || isGuestId(user.id)) return sendJSON(res, 200, generic);
 
-        return sendJSON(res, 200, {
-          success: true,
-          message: 'Password reset token generated successfully. In production, this would be delivered via verified email.',
-          demoResetToken: resetToken
-        });
-      }
+        // Chống gửi dồn: mỗi tài khoản tối đa 1 email / 60 giây
+        const recent = await db.prepare("SELECT created_at FROM password_resets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1").get(user.id);
+        if (recent && Date.now() - Date.parse(recent.created_at) < 60 * 1000) return sendJSON(res, 200, generic);
 
-      // POST /api/auth/reset-password
-      if (pathname === '/api/auth/reset-password' && method === 'POST') {
-        const body = await parseBody(req);
-        const { token, new_password } = body;
-        if (!token || !new_password) {
-          return sendJSON(res, 400, { success: false, message: 'Token and new password are required.' });
+        const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+        const tempPassword = Array.from(crypto.randomBytes(10), b => ALPHABET[b % ALPHABET.length]).join('');
+        const { hash, salt } = hashPassword(tempPassword);
+        const token = `tmp$${salt}$${hash}`;
+        const minutes = 30;
+        await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(user.id);
+        await db.prepare('INSERT INTO password_resets (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+          .run(token, user.id, Date.now() + minutes * 60 * 1000, new Date().toISOString());
+        try {
+          const proto = req.headers['x-forwarded-proto'] || 'http';
+          const mail = tempPasswordEmail({ name: user.full_name, tempPassword, minutes, lang, appUrl: req.headers.host ? `${proto}://${req.headers.host}` : '' });
+          await sendMail({ to: user.email, ...mail });
+        } catch (err) {
+          console.error('[LifeCare Mail] Gửi mật khẩu tạm thất bại:', err.message);
+          await db.prepare('DELETE FROM password_resets WHERE token = ?').run(token);
+          return sendJSON(res, 502, { success: false, message: T('Không gửi được email lúc này. Vui lòng thử lại sau.', 'Could not send the email right now. Please try again later.') });
         }
-
-        const resetRecord = await db.prepare('SELECT user_id, expires_at FROM password_resets WHERE token = ?').get(token);
-        if (!resetRecord || Date.now() > resetRecord.expires_at) {
-          return sendJSON(res, 400, { success: false, message: 'Reset token is invalid or has expired.' });
-        }
-
-        const { hash, salt } = hashPassword(new_password);
-        await db.prepare('UPDATE users SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?').run(
-          hash, salt, new Date().toISOString(), resetRecord.user_id
-        );
-        await db.prepare('DELETE FROM password_resets WHERE token = ?').run(token);
-
-        return sendJSON(res, 200, { success: true, message: 'Password updated successfully. You may now log in.' });
+        return sendJSON(res, 200, generic);
       }
 
       // GET /api/auth/me
@@ -685,14 +703,6 @@ async function routeRequest(req, res) {
           now,
           now
         );
-
-        // If reminder_time is provided, create a reminder notification
-        if (reminder_time) {
-          await db.prepare(`
-            INSERT INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
-            VALUES (?, ?, ?, ?, 'schedule', ?, 0, 1, ?)
-          `).run('notif_' + crypto.randomUUID(), user.id, `Reminder: ${title.trim()}`, `Scheduled at ${start_time || date}. Don't forget!`, reminder_time, now);
-        }
 
         const created = await db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
         return sendJSON(res, 201, { success: true, message: 'Task created successfully.', task: created, overlapWarning });

@@ -52,6 +52,22 @@
 
 ---
 
+## 🔑 Quên mật khẩu (gửi mật khẩu tạm qua email)
+
+Mật khẩu chỉ được lưu dạng băm (PBKDF2), nên không ai, kể cả máy chủ, xem lại được mật khẩu cũ.
+Khi quên mật khẩu, LifeCare gửi một **mật khẩu tạm thời ngẫu nhiên** (dùng được 30 phút) tới email đã đăng ký:
+
+- Mật khẩu cũ vẫn dùng được cho tới khi người dùng đăng nhập bằng mật khẩu tạm, nên người khác nhập email của bạn cũng không khoá được tài khoản.
+- Đăng nhập bằng mật khẩu tạm thì app mở Cài đặt để đặt mật khẩu mới ngay.
+- Câu trả lời luôn giống nhau, không để lộ email nào đã đăng ký; mỗi tài khoản tối đa 1 email / 60 giây.
+
+Cấu hình gửi bằng Gmail (biến môi trường trên Vercel):
+1. Bật **Xác minh 2 bước** cho tài khoản Gmail dùng để gửi.
+2. Tạo **Mật khẩu ứng dụng** tại https://myaccount.google.com/apppasswords (16 ký tự).
+3. Đặt `SMTP_USER` = địa chỉ Gmail đó, `SMTP_PASS` = mật khẩu ứng dụng (không phải mật khẩu Gmail), rồi deploy lại.
+
+Chưa cấu hình thì nút "Gửi Mật Khẩu Tạm Thời" báo chức năng chưa được thiết lập.
+
 ## 🚀 Getting Started
 
 ### Lưu dữ liệu: Google Sheet / JSON (có mã hoá)

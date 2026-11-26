@@ -288,32 +288,6 @@ async function seedInitialDemoData(userId, lang = 'vi') {
   } catch (e) {
     console.warn('[LifeCare Seed] Planning demo data:', e.message);
   }
-
-  // Seed sample reminder notifications
-  try {
-    await db.prepare(`
-      INSERT OR IGNORE INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 1, datetime('now'))
-    `).run(
-      sid('notif_demo_1'),
-      userId,
-      S('Nhắc uống nước 💧', 'Daily Hydration Check 💧'),
-      S('Uống một cốc nước để cơ thể tỉnh táo và tập trung.', 'Drink a fresh glass of water to keep your body vibrant and focused.'),
-      'health',
-      '14:30'
-    );
-    await db.prepare(`
-      INSERT OR IGNORE INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, 1, datetime('now'))
-    `).run(
-      sid('notif_demo_2'),
-      userId,
-      S('Sắp tới: Họp nhóm dự án 📅', 'Upcoming: Team Product Sync 📅'),
-      S('Bắt đầu sau 30 phút, lúc 14:00.', 'Starting in 30 minutes at 14:00.'),
-      'schedule',
-      '13:30'
-    );
-  } catch (e) {}
 }
 
 // ------------------------------------------------------------------

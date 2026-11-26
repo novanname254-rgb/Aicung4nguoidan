@@ -39,7 +39,7 @@ const I18N = {
     nonBinary: "Khác / Không nhị nguyên",
     goals: "Mục tiêu sức khỏe cá nhân",
     createAccountBtn: "Tạo Tài Khoản",
-    sendInstructions: "Gửi Hướng Dẫn",
+    sendInstructions: "Gửi Mật Khẩu Tạm Thời",
     backToSignIn: "← Quay lại đăng nhập",
 
     // Dashboard
@@ -262,7 +262,7 @@ const I18N = {
     nonBinary: "Non-binary / Other",
     goals: "Personal Wellness Goals",
     createAccountBtn: "Create My Account",
-    sendInstructions: "Send Instructions",
+    sendInstructions: "Send Temporary Password",
     backToSignIn: "← Back to sign in",
 
     // Dashboard

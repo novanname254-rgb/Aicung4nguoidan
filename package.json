@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/novanname254-rgb/Aicung4nguoidan#readme",
   "dependencies": {
-    "@libsql/client": "^0.18.0"
+    "@libsql/client": "^0.18.0",
+    "nodemailer": "^7.0.11"
   }
 }

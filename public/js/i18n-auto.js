@@ -24,7 +24,7 @@
     ['Dùng tài khoản khách (không lưu dữ liệu)', 'Use a guest account (no data saved)'],
     ['Có sẵn dữ liệu mẫu để xem thử', 'Include sample data to explore'],
     ['Chuyển dữ liệu đang dùng thử (tài khoản khách) sang tài khoản mới', 'Move the data from this guest session into the new account'],
-    ['Nhập email đã đăng ký của bạn để nhận hướng dẫn khôi phục mật khẩu an toàn.', 'Enter your registered email to receive secure password recovery instructions.'],
+    ['Nhập email đã đăng ký. LifeCare sẽ gửi một mật khẩu tạm thời tới email đó để bạn đăng nhập rồi đặt mật khẩu mới.', 'Enter your registered email. LifeCare will send a temporary password to it so you can sign in and set a new password.'],
     ['Bạn đang dùng', 'You are using'],
     ['tài khoản khách', 'a guest account'],
     ['dữ liệu', 'data is'],
@@ -427,7 +427,6 @@
     ['Tích vào công việc bạn muốn được nhắc khi đến giờ.', 'Tick the tasks you want to be reminded about when they are due.'],
     ['Nhắc kèm âm thanh (âm báo mặc định của điện thoại)', 'Play a sound (your phone\'s default notification sound)'],
     ['Thử âm báo', 'Test sound'],
-    ['Thông báo khác', 'Other notifications'],
     ['Hằng tuần', 'Weekly'],
     ['Hằng tháng', 'Monthly'],
   ];
