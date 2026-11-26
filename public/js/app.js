@@ -543,7 +543,7 @@ async function loadDashboard() {
     // Sleep Metric
     if (dash.healthStatus.latestPhysical && dash.healthStatus.latestPhysical.sleep_duration) {
       document.getElementById('dashSleepDuration').innerText = `${dash.healthStatus.latestPhysical.sleep_duration}h`;
-      document.getElementById('dashSleepQuality').innerText = `${t('sleepQuality')}: ${tr(dash.healthStatus.latestPhysical.sleep_quality || 'Good')}`;
+      document.getElementById('dashSleepQuality').innerText = `${t('sleepQuality').replace(/^\d+\.\s*/, '')}: ${tr(dash.healthStatus.latestPhysical.sleep_quality || 'Good')}`;
     } else {
       document.getElementById('dashSleepDuration').innerText = '--';
       document.getElementById('dashSleepQuality').innerText = t('pendingCheckin');
