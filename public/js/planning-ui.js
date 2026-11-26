@@ -831,7 +831,29 @@ function openBlockModal(block = null) {
   document.getElementById('blockStart').value = block ? block.start_time : '19:30';
   document.getElementById('blockEnd').value = block ? block.end_time : '21:00';
   renderDayPicker(document.getElementById('blockDayPicker'), block ? block.days.split(',') : DAY_KEYS_UI.slice(0, 5));
+  document.getElementById('btnDeleteBlock').hidden = !block; // chỉ có nút xoá khi đang sửa
   openModal('blockModal');
+}
+
+/** Xoá khung giờ đang sửa (khỏi mọi ngày nó áp dụng, ở mọi tuần). */
+async function deleteBlockFromModal() {
+  const id = document.getElementById('blockIdInput').value;
+  const block = routineBlocks.find(b => b.id === id);
+  if (!block) return;
+  const name = block.label || BLOCK_META[block.block_type]?.label || '';
+  const days = block.days.split(',').map(d => DAY_SHORT[d]).join(', ');
+  if (!confirm(L(
+    `Xóa khung giờ "${name}" (${block.start_time}–${block.end_time}, ${days}) khỏi mọi tuần?`,
+    `Delete the "${name}" block (${block.start_time}–${block.end_time}, ${days}) from every week?`
+  ))) return;
+  try {
+    await apiRequest(`/api/routine/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    closeModal('blockModal');
+    showToast(L(`Đã xóa khung giờ "${name}".`, `Deleted the "${name}" block.`), 'success');
+    const sc = document.querySelector('#routineWeekGrid .rw-scroll');
+    routineKeepScroll = sc ? sc.scrollTop : null;
+    loadRoutine();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 // ================================================================ MỤC TIÊU & TIẾN ĐỘ
@@ -1351,6 +1373,7 @@ function bindPlanningUI() {
       loadRoutine();
     } catch (err) { showToast(err.message, 'error'); }
   });
+  document.getElementById('btnDeleteBlock').addEventListener('click', deleteBlockFromModal);
   document.getElementById('blockForm').addEventListener('submit', async e => {
     e.preventDefault();
     const id = document.getElementById('blockIdInput').value;

@@ -1588,6 +1588,10 @@ body.rw-dragging, body.rw-dragging * { cursor: grabbing !important; user-select:
 .btn-danger-soft { background: rgba(239, 68, 68, 0.1); color: #dc2626; border: 1px solid rgba(239, 68, 68, 0.35); }
 .btn-danger-soft:hover { background: rgba(239, 68, 68, 0.18); }
 .btn-danger { background: #ef4444; color: #fff; }
+/* Form sửa khung giờ: nút xoá bên trái, nút lưu chiếm phần còn lại */
+.block-form-actions { display: flex; gap: 10px; }
+.block-form-actions .btn-primary { flex: 1; }
+.block-form-actions [hidden] { display: none !important; }
 .btn-danger:hover { background: #dc2626; }
 .btn-danger:disabled { opacity: 0.45; cursor: not-allowed; }
 [data-theme="dark"] .btn-danger-soft { color: #fca5a5; }

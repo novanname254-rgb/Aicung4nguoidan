@@ -134,6 +134,7 @@
     ['Xóa tất cả kế hoạch', 'Delete all plans'],
     ['Xóa nhiều kế hoạch cùng một lúc', 'Delete several plans at once'],
     ['Chọn các kế hoạch muốn xóa trong tuần này.', 'Choose which plans to delete this week.'],
+    ['Xóa khung giờ', 'Delete block'],
     ['Khung giờ cố định (ngủ, ăn, đi học...) không bị xóa.', 'Fixed time blocks (sleep, meals, school...) are not deleted.'],
     ['Kéo thả công việc hoặc khung giờ sang ngày, giờ khác để sắp xếp lại; kéo mép trên/dưới để đổi giờ bắt đầu/kết thúc. Kéo một nhãn ở trên xuống lưới để thêm mới. Bấm vào khung giờ để sửa.', 'Drag a task or time block to another day or time to rearrange it; drag its top/bottom edge to change the start/end time. Drag a label above onto the grid to add one. Click a block to edit it.'],
     ['Chọn tất cả', 'Select all'],
