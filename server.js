@@ -34,7 +34,8 @@ function sendJSON(res, statusCode, data, headers = {}) {
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Timezone',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Timezone, X-Data-Version',
+    'Access-Control-Expose-Headers': 'X-Data-Version',
     ...headers
   });
   res.end(JSON.stringify(data));
@@ -74,6 +75,19 @@ async function getAuthUser(req) {
   }
   // Không còn tự dùng chung tài khoản demo: phải đăng nhập hoặc chọn tài khoản khách.
   let user = token ? await getUserFromSession(token) : null;
+  // Đọc-sau-khi-ghi: trình duyệt gửi phiên bản dữ liệu nó đã thấy (X-Data-Version). Nếu instance này
+  // đang giữ bản cũ hơn (vì lần ghi vừa rồi chạy ở instance khác), cập nhật từ Sheet trước khi trả lời.
+  const seen = getDb().versionTs(req.headers['x-data-version']);
+  // Phiên chưa biết mà trình duyệt đã thấy một phiên bản dữ liệu: chắc chắn instance này đang cũ.
+  const localTs = user ? getDb().versionTs(getDb().dataVersion(user.id)) : 0;
+  if (token && seen && seen > localTs) {
+    try {
+      await getDb().syncFromStore({ immediate: true });
+      user = await getUserFromSession(token);
+    } catch (err) {
+      console.warn('[LifeCare Auth] Version re-sync failed:', err.message);
+    }
+  }
   if (token && !user) {
     // Trên Vercel có nhiều instance: phiên có thể vừa được tạo ở instance khác và đã ghi lên
     // Google Sheet, còn instance này đang giữ bản cũ. Buộc kiểm tra Sheet rồi thử lại một lần.
@@ -84,6 +98,7 @@ async function getAuthUser(req) {
       console.warn('[LifeCare Auth] Session re-sync failed:', err.message);
     }
   }
+  if (user) req._authUserId = user.id; // để gửi kèm phiên bản dữ liệu trong phản hồi
   return user ? { ...user, is_guest: isGuestId(user.id) } : null;
 }
 
@@ -134,6 +149,10 @@ async function handleRequest(req, res) {
     console.error('[LifeCare Server] Persist failed:', err.message);
     return sendJSON(realRes, 503, { success: false, message: 'Đã xử lý nhưng chưa lưu được dữ liệu: ' + err.message + '. Thử lại nhé.' });
   }
+  if (req._authUserId) {
+    const v = getDb().dataVersion(req._authUserId);
+    if (v) realRes.setHeader('X-Data-Version', v);
+  }
   if (pending && pending.head) realRes.writeHead(...pending.head);
   realRes.end(...((pending && pending.body) || []));
 }
@@ -177,7 +196,7 @@ async function routeRequest(req, res) {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Timezone',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Timezone, X-Data-Version',
       'Access-Control-Max-Age': '86400'
     });
     return res.end();
@@ -247,6 +266,7 @@ async function routeRequest(req, res) {
         }
 
         const { token } = await createSession(userId);
+        req._authUserId = userId;
         const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at FROM users WHERE id = ?').get(userId);
 
         return sendJSON(res, 201, {
@@ -274,6 +294,7 @@ async function routeRequest(req, res) {
         }
 
         const { token } = await createSession(user.id);
+        req._authUserId = user.id;
         const safeUser = {
           id: user.id,
           email: user.email,
@@ -300,6 +321,7 @@ async function routeRequest(req, res) {
         const body = await parseBody(req);
         const guestId = await createGuestUser({ withSampleData: body.sample_data !== false });
         const { token } = await createSession(guestId);
+        req._authUserId = guestId;
         const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at FROM users WHERE id = ?').get(guestId);
         return sendJSON(res, 201, { success: true, message: 'Đang dùng tài khoản khách. Dữ liệu sẽ không được lưu.', token, user: { ...user, is_guest: true } });
       }

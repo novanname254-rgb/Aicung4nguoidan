@@ -9,7 +9,7 @@
 ### 1. User Authentication & Private Data Vault
 - **Hai cách sử dụng:**
   - **Đăng nhập / Đăng ký**: dữ liệu được lưu (Google Sheet / JSON) và mã hoá.
-  - **Tài khoản khách**: dùng thử ngay, **không lưu dữ liệu**. Mỗi khách có tài khoản riêng (tuỳ chọn có sẵn dữ liệu mẫu), chỉ nằm trong bộ nhớ server, không bao giờ ghi ra Sheet/JSON. Dữ liệu khách mất khi đăng xuất, sau 24 giờ, hoặc khi server khởi động lại.
+  - **Tài khoản khách**: dùng thử ngay, **không lưu dữ liệu**. Mỗi khách có tài khoản riêng (tuỳ chọn có sẵn dữ liệu mẫu). Dữ liệu khách không bao giờ nằm trong các tab dữ liệu chính. Trên Google Sheet, nó chỉ được giữ **tạm**, mã hoá nguyên khối, ở tab `_guests` để mọi instance Vercel cùng dùng được. Dữ liệu này bị xoá khi khách đăng xuất hoặc sau 24 giờ. Khi chạy trên máy (file JSON), dữ liệu khách chỉ nằm trong bộ nhớ.
   - Khách muốn giữ lại dữ liệu: bấm **"Tạo tài khoản để lưu"**, đăng ký với tuỳ chọn "Chuyển dữ liệu đang dùng thử". Toàn bộ dữ liệu (công việc, mục tiêu, tiến độ, thời gian biểu, sức khoẻ, tâm trạng, chat AI, cài đặt, tâm lý nền) được chuyển sang tài khoản mới, và từ đó được lưu và mã hoá.
   - Tài khoản demo `alex.balance@lifecare.app` / `LifeCare2026!` vẫn đăng nhập được (dữ liệu demo có lưu).
 - **Multi-user Authentication:** Registration, login, session tokens, password recovery, profile editing (name, DOB, gender, wellness goals, avatar), and password management.
@@ -82,6 +82,10 @@ Tiêu đề và mô tả công việc để nguyên. Mật khẩu vốn đã đ�
    - `GOOGLE_SERVICE_ACCOUNT_JSON`: dán toàn bộ nội dung file JSON ở bước 4. Có thể dán dạng base64: `base64 -i key.json`.
    - `DATA_ENCRYPTION_KEY`: tạo bằng lệnh `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
    - `GROQ_API_KEY`: để bật trợ lý AI.
+
+Nhiều instance Vercel dùng chung Sheet:
+- Mỗi phản hồi API kèm header `X-Data-Version`, trình duyệt gửi lại ở yêu cầu sau. Instance nào đang giữ bản cũ hơn sẽ nạp lại từ Sheet trước khi trả lời.
+- Google Sheets chỉ cho khoảng 60 lượt đọc/phút. Server gộp các lần kiểm tra. Nếu Sheet tạm báo bận, server vẫn phục vụ bằng dữ liệu đang có và tự thử ghi lại.
 
 Không sửa tay dữ liệu trong Sheet: các ô `enc:v1:...` là bản mã. Nếu sửa tay, nhớ tăng phiên bản ở ô `_meta!A1` để server nạp lại.
 

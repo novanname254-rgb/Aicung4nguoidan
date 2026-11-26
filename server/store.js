@@ -29,10 +29,13 @@ class JsonFileStore {
     return JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
   }
 
-  // Chỉ một tiến trình ghi file này, nên không cần kiểm tra thay đổi từ nơi khác.
-  async getVersion() {
-    return null;
+  // Chỉ một tiến trình ghi file này, nên không cần kiểm tra thay đổi từ nơi khác,
+  // và dữ liệu khách chỉ cần nằm trong bộ nhớ.
+  async getState() {
+    return { version: null, guests: [] };
   }
+
+  async saveGuests() {}
 
   async save(snapshot) {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
@@ -43,8 +46,12 @@ class JsonFileStore {
 }
 
 // ---------------------------------------------------------------- Google Sheet
-const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
+const SHEETS_API = process.env.SHEETS_API_BASE || 'https://sheets.googleapis.com/v4/spreadsheets'; // ghi đè chỉ để kiểm thử
 const META_TAB = '_meta';
+// Tab lưu TẠM dữ liệu tài khoản khách: mỗi khách một dòng [guest_id, version, expires_at, khối mã hoá...].
+// Dòng bị xoá khi khách đăng xuất hoặc hết hạn (24 giờ). Khối mã hoá được chia nhỏ vì mỗi ô tối đa 50.000 ký tự.
+const GUEST_TAB = '_guests';
+const CELL_CHUNK = 45000;
 
 function parseServiceAccount(raw) {
   let text = (raw || '').trim();
@@ -63,7 +70,7 @@ class GoogleSheetStore {
     this.account = parseServiceAccount(serviceAccountRaw);
     this._token = null;
     this._tokenExp = 0;
-    this._knownTabs = null;
+    this._knownTabs = null; // tên tab -> { sheetId, rows, cols }
   }
 
   describe() {
@@ -123,20 +130,79 @@ class GoogleSheetStore {
 
   async ensureTabs(names) {
     if (!this._knownTabs) {
-      const info = await this.api('GET', '?fields=sheets.properties.title');
-      this._knownTabs = new Set((info.sheets || []).map(s => s.properties.title));
+      const info = await this.api('GET', '?fields=sheets.properties(title,sheetId,gridProperties(rowCount,columnCount))');
+      this._knownTabs = new Map((info.sheets || []).map(s => [s.properties.title, {
+        sheetId: s.properties.sheetId,
+        rows: s.properties.gridProperties?.rowCount || 1000,
+        cols: s.properties.gridProperties?.columnCount || 26
+      }]));
     }
     const missing = names.filter(n => !this._knownTabs.has(n));
     if (missing.length) {
-      await this.api('POST', ':batchUpdate', { requests: missing.map(title => ({ addSheet: { properties: { title } } })) });
-      missing.forEach(n => this._knownTabs.add(n));
+      const out = await this.api('POST', ':batchUpdate', { requests: missing.map(title => ({ addSheet: { properties: { title } } })) });
+      (out.replies || []).forEach((r, i) => {
+        const p = r.addSheet?.properties || {};
+        this._knownTabs.set(missing[i], { sheetId: p.sheetId, rows: p.gridProperties?.rowCount || 1000, cols: p.gridProperties?.columnCount || 26 });
+      });
+      missing.forEach(n => { if (!this._knownTabs.has(n)) this._knownTabs.set(n, { sheetId: undefined, rows: 1000, cols: 26 }); });
     }
   }
 
-  async getVersion() {
-    await this.ensureTabs([META_TAB]);
-    const data = await this.api('GET', `/values/${encodeURIComponent(META_TAB + '!A1')}?valueRenderOption=UNFORMATTED_VALUE`);
-    return data.values?.[0]?.[0] ?? null;
+  /** Nới rộng lưới của tab nếu dữ liệu cần nhiều hàng / cột hơn (tab mới chỉ có 1000 × 26 ô). */
+  async ensureGrid(sizes) {
+    const requests = [];
+    for (const [title, { rows, cols }] of Object.entries(sizes)) {
+      const g = this._knownTabs.get(title);
+      if (!g || g.sheetId === undefined) continue;
+      const needRows = Math.max(g.rows, rows + 50);
+      const needCols = Math.max(g.cols, cols);
+      if (needRows > g.rows || needCols > g.cols) {
+        requests.push({ updateSheetProperties: {
+          properties: { sheetId: g.sheetId, gridProperties: { rowCount: needRows, columnCount: needCols } },
+          fields: 'gridProperties(rowCount,columnCount)'
+        } });
+        g.rows = needRows; g.cols = needCols;
+      }
+    }
+    if (requests.length) await this.api('POST', ':batchUpdate', { requests });
+  }
+
+  static parseGuests(values) {
+    return (values || []).filter(r => r && r[0]).map(r => ({
+      id: String(r[0]),
+      version: r[1] == null ? null : String(r[1]),
+      expires_at: Number(r[2]) || 0,
+      blob: r.slice(3).filter(v => v !== '' && v != null).join('')
+    }));
+  }
+
+  /** Một lần đọc: phiên bản dữ liệu chính + toàn bộ dữ liệu khách đang dùng. */
+  async getState() {
+    await this.ensureTabs([META_TAB, GUEST_TAB]);
+    const data = await this.api('GET', `/values:batchGet?ranges=${encodeURIComponent(META_TAB + '!A1:B1')}&ranges=${encodeURIComponent(GUEST_TAB)}&valueRenderOption=UNFORMATTED_VALUE`);
+    const ranges = data.valueRanges || [];
+    return { version: ranges[0]?.values?.[0]?.[0] ?? null, guests: GoogleSheetStore.parseGuests(ranges[1]?.values) };
+  }
+
+  /** Cập nhật dữ liệu khách: upserts [{id, version, expires_at, blob}], removed [id]. Tự bỏ các khách đã hết hạn. */
+  async saveGuests({ upserts = [], removed = [] }) {
+    await this.ensureTabs([GUEST_TAB]);
+    const data = await this.api('GET', `/values/${encodeURIComponent(GUEST_TAB)}?valueRenderOption=UNFORMATTED_VALUE`);
+    const now = Date.now();
+    const byId = new Map(GoogleSheetStore.parseGuests(data.values).map(g => [g.id, g]));
+    removed.forEach(id => byId.delete(id));
+    upserts.forEach(g => byId.set(g.id, g));
+    const rows = [...byId.values()].filter(g => g.expires_at > now).map(g => {
+      const chunks = [];
+      for (let i = 0; i < g.blob.length; i += CELL_CHUNK) chunks.push(g.blob.slice(i, i + CELL_CHUNK));
+      return [g.id, g.version, g.expires_at, ...chunks];
+    });
+    const width = Math.max(4, ...rows.map(r => r.length));
+    await this.ensureGrid({ [GUEST_TAB]: { rows: rows.length + 1, cols: width } });
+    await this.api('POST', '/values:batchClear', { ranges: [GUEST_TAB] });
+    if (rows.length) {
+      await this.api('POST', '/values:batchUpdate', { valueInputOption: 'RAW', data: [{ range: `${GUEST_TAB}!A1`, values: rows }] });
+    }
   }
 
   async load(tableNames) {
@@ -161,6 +227,7 @@ class GoogleSheetStore {
   async save(snapshot) {
     const names = Object.keys(snapshot.tables);
     await this.ensureTabs([META_TAB, ...names]);
+    await this.ensureGrid(Object.fromEntries(names.map(n => [n, { rows: snapshot.tables[n].rows.length + 1, cols: snapshot.tables[n].columns.length }])));
     await this.api('POST', '/values:batchClear', { ranges: names });
     const data = names.map(name => {
       const { columns, rows } = snapshot.tables[name];

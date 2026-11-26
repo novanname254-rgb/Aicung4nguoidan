@@ -11,7 +11,7 @@
 const { createClient } = require('@libsql/client');
 const crypto = require('node:crypto');
 const { createStore } = require('./store');
-const { encryptRows, decryptRows } = require('./crypto-fields');
+const { encryptRows, decryptRows, encryptValue, decryptValue } = require('./crypto-fields');
 
 // Thứ tự bảng: bảng cha trước bảng con.
 const TABLES = [
@@ -226,10 +226,18 @@ const state = {
   persistChain: Promise.resolve(),
   lastSavedHash: null, // bỏ qua lần ghi nếu dữ liệu cần lưu không đổi
   syncPromise: null,
+  guestVersions: {}, // guest_id -> phiên bản dữ liệu khách đã lưu tạm trên Sheet
+  guestHashes: {},   // guest_id -> mã băm lần lưu gần nhất (bỏ qua nếu không đổi)
   columns: {} // bảng -> danh sách cột hiện tại
 };
 
-// Tài khoản khách (id bắt đầu "guest_") không bao giờ được ghi ra Google Sheet / JSON.
+const GUEST_TTL_MS = 24 * 60 * 60 * 1000;
+const newVersion = () => `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+const versionTs = v => Number(String(v || '').split('-')[0]) || 0;
+
+// Tài khoản khách (id bắt đầu "guest_") không bao giờ nằm trong dữ liệu chính trên Google Sheet / JSON.
+// Trên Google Sheet, dữ liệu khách chỉ được giữ TẠM (mã hoá nguyên khối) ở tab "_guests" để mọi
+// instance Vercel cùng thấy, và bị xoá khi khách đăng xuất hoặc sau 24 giờ.
 const GUEST_FILTER = t => (t === 'users' ? "id NOT LIKE 'guest\\_%' ESCAPE '\\'" : "user_id NOT LIKE 'guest\\_%' ESCAPE '\\'");
 const GUEST_ONLY = t => (t === 'users' ? "id LIKE 'guest\\_%' ESCAPE '\\'" : "user_id LIKE 'guest\\_%' ESCAPE '\\'");
 
@@ -265,6 +273,9 @@ const db = {
   },
 
   isDirty: () => state.dirty,
+  /** Phiên bản dữ liệu mà người dùng này đang thấy (khách: phiên bản riêng; người dùng thật: dữ liệu chính). */
+  dataVersion: userId => (isGuest(userId) ? state.guestVersions[userId] || null : state.version),
+  versionTs,
   persist: () => persist(),
   syncFromStore: opts => syncFromStore(opts),
   storeInfo: () => store.describe()
@@ -314,7 +325,8 @@ async function loadSnapshot(snapshot) {
     const rows = guestRows[t];
     if (!rows.length) continue;
     const cols = Object.keys(rows[0]);
-    const sql = `INSERT OR REPLACE INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
+    // OR IGNORE: dữ liệu trên Sheet thắng (VD dữ liệu khách vừa được chuyển sang tài khoản thật ở instance khác).
+    const sql = `INSERT OR IGNORE INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
     await client.batch(rows.map(o => ({ sql, args: cols.map(c => o[c] ?? null) })), 'write');
   }
   await client.execute('PRAGMA foreign_keys = ON');
@@ -343,6 +355,83 @@ function encryptSnapshot(plain) {
   return { version: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`, savedAt: new Date().toISOString(), tables };
 }
 
+// ---------------------------------------------------------------- dữ liệu khách (lưu tạm)
+const isGuest = id => typeof id === 'string' && id.startsWith('guest_');
+
+async function localGuestIds() {
+  const rs = await client.execute(`SELECT id FROM users WHERE ${GUEST_ONLY('users')}`);
+  return rs.rows.map(r => r.id);
+}
+
+async function dumpGuest(gid) {
+  const out = {};
+  for (const t of TABLES) {
+    const rs = await client.execute({ sql: `SELECT * FROM ${t} WHERE ${t === 'users' ? 'id' : 'user_id'} = ? ORDER BY rowid`, args: [gid] });
+    if (rs.rows.length) out[t] = rs.rows.map(r => ({ ...r }));
+  }
+  return out;
+}
+
+async function removeGuestLocally(gid) {
+  await client.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [gid] }); // xoá dây chuyền mọi bảng con
+  delete state.guestVersions[gid];
+  delete state.guestHashes[gid];
+}
+
+async function loadGuest(g) {
+  const data = decryptValue(g.blob);
+  await client.execute('PRAGMA foreign_keys = OFF');
+  for (const t of [...TABLES].reverse()) {
+    await client.execute({ sql: `DELETE FROM ${t} WHERE ${t === 'users' ? 'id' : 'user_id'} = ?`, args: [g.id] });
+  }
+  for (const t of TABLES) {
+    const rows = data[t] || [];
+    if (!rows.length) continue;
+    const cols = Object.keys(rows[0]).filter(c => state.columns[t].includes(c));
+    const sql = `INSERT OR REPLACE INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
+    await client.batch(rows.map(o => ({ sql, args: cols.map(c => o[c] ?? null) })), 'write');
+  }
+  await client.execute('PRAGMA foreign_keys = ON');
+  state.guestVersions[g.id] = g.version;
+  state.guestHashes[g.id] = crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
+}
+
+/** Đồng bộ dữ liệu khách theo trạng thái trên Sheet: nạp khách đổi phiên bản, xoá khách đã bị xoá ở nơi khác. */
+async function applyRemoteGuests(remoteGuests) {
+  const now = Date.now();
+  const remoteIds = new Set();
+  for (const g of remoteGuests) {
+    if (g.expires_at <= now) continue;
+    remoteIds.add(g.id);
+    if (state.guestVersions[g.id] !== g.version) await loadGuest(g);
+  }
+  for (const gid of await localGuestIds()) {
+    // Chỉ xoá khách đã từng được lưu (khách vừa tạo ở request đang chạy thì chưa có phiên bản).
+    if (!remoteIds.has(gid) && state.guestVersions[gid]) await removeGuestLocally(gid);
+  }
+}
+
+/** Lưu tạm các khách có thay đổi; gỡ khách đã đăng xuất / hết hạn. */
+async function persistGuests() {
+  if (store.kind !== 'google-sheet') return;
+  const ids = await localGuestIds();
+  const upserts = [];
+  const newHashes = {};
+  for (const gid of ids) {
+    const data = await dumpGuest(gid);
+    const hash = crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
+    if (hash === state.guestHashes[gid]) continue;
+    const created = Date.parse(data.users?.[0]?.created_at || '') || Date.now();
+    upserts.push({ id: gid, version: newVersion(), expires_at: created + GUEST_TTL_MS, blob: encryptValue(data) });
+    newHashes[gid] = hash;
+  }
+  const removed = Object.keys(state.guestHashes).filter(gid => !ids.includes(gid));
+  if (!upserts.length && !removed.length) return;
+  await store.saveGuests({ upserts, removed });
+  for (const g of upserts) { state.guestVersions[g.id] = g.version; state.guestHashes[g.id] = newHashes[g.id]; }
+  for (const gid of removed) { delete state.guestVersions[gid]; delete state.guestHashes[gid]; }
+}
+
 async function persist() {
   // Ghi tuần tự: hai request song song không ghi đè lẫn nhau.
   const run = state.persistChain.then(async () => {
@@ -350,12 +439,14 @@ async function persist() {
     state.dirty = false;
     try {
       const { plain, hash } = await dumpPlain();
-      if (hash === state.lastSavedHash) return; // chỉ dữ liệu khách thay đổi: không cần ghi
-      const snapshot = encryptSnapshot(plain);
-      await store.save(snapshot);
-      state.version = snapshot.version;
-      state.lastSavedHash = hash;
-      state.lastVersionCheck = Date.now();
+      if (hash !== state.lastSavedHash) { // chỉ dữ liệu khách thay đổi thì không ghi lại dữ liệu chính
+        const snapshot = encryptSnapshot(plain);
+        await store.save(snapshot);
+        state.version = snapshot.version;
+        state.lastSavedHash = hash;
+        state.lastVersionCheck = Date.now();
+      }
+      await persistGuests();
     } catch (err) {
       state.dirty = true; // lần sau thử lại
       throw err;
@@ -366,21 +457,24 @@ async function persist() {
 }
 
 /** Nạp lại nếu một instance khác (Vercel) vừa ghi phiên bản mới. force = kiểm tra ngay, bỏ qua bộ đệm 15 giây. */
-async function syncFromStore({ force = false, unknownSession = false } = {}) {
+async function syncFromStore({ force = false, unknownSession = false, immediate = false } = {}) {
   if (store.kind !== 'google-sheet' || state.dirty) return;
-  const age = Date.now() - state.lastVersionCheck;
+  let age = Date.now() - state.lastVersionCheck;
+  // immediate: trình duyệt cho biết đã thấy phiên bản mới hơn bản instance này đang giữ.
+  if (immediate) age = Infinity;
   // Google Sheets chỉ cho ~60 lượt đọc/phút: yêu cầu đọc kiểm tra tối đa 15 giây/lần, yêu cầu ghi
   // tối đa 2 giây/lần, mã phiên lạ (có thể vừa tạo ở instance khác) tối đa 1 giây/lần;
   // các yêu cầu đồng thời dùng chung một lần kiểm tra.
   if (age < (unknownSession ? 1_000 : force ? 2_000 : 15_000)) return;
   if (state.syncPromise) return state.syncPromise;
   state.syncPromise = (async () => {
-    const remote = await store.getVersion();
+    const remote = await store.getState(); // một lần đọc: phiên bản dữ liệu chính + dữ liệu khách
     state.lastVersionCheck = Date.now();
-    if (remote && remote !== state.version) {
+    if (remote.version && remote.version !== state.version) {
       console.log('[LifeCare DB] Phát hiện dữ liệu mới trên Google Sheet, đang nạp lại...');
       await loadSnapshot(await store.load(TABLES));
     }
+    await applyRemoteGuests(remote.guests);
   })().finally(() => { state.syncPromise = null; });
   return state.syncPromise;
 }
@@ -395,6 +489,7 @@ async function initDatabase() {
       const snapshot = await store.load(TABLES);
       if (snapshot) await loadSnapshot(snapshot);
       else state.lastSavedHash = null;
+      await applyRemoteGuests((await store.getState()).guests);
       state.lastVersionCheck = Date.now();
       console.log(`[LifeCare DB] Lưu trữ: ${store.describe()} (${snapshot ? 'đã nạp dữ liệu' : 'chưa có dữ liệu'})`);
       state.initialized = true;

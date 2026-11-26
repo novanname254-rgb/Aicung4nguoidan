@@ -76,6 +76,7 @@ async function apiRequest(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
     'X-Timezone': USER_TZ,
+    ...(AppState.dataVersion ? { 'X-Data-Version': AppState.dataVersion } : {}),
     ...(AppState.token ? { 'Authorization': `Bearer ${AppState.token}` } : {}),
     ...(options.headers || {})
   };
@@ -85,6 +86,11 @@ async function apiRequest(endpoint, options = {}) {
       ...options,
       headers
     });
+    // Ghi nhớ phiên bản dữ liệu mới nhất đã thấy, để instance server khác không trả về bản cũ.
+    const seenVersion = res.headers.get('X-Data-Version');
+    if (seenVersion && (Number(seenVersion.split('-')[0]) || 0) >= (Number(String(AppState.dataVersion || '').split('-')[0]) || 0)) {
+      AppState.dataVersion = seenVersion;
+    }
     const data = await res.json();
     if (!res.ok) {
       // 401 có thể do instance server chưa kịp cập nhật phiên mới: thử lại một lần trước khi đăng xuất.
@@ -457,6 +463,7 @@ function bindAuthEvents() {
 }
 
 function onSignedIn(user, token) {
+  AppState.dataVersion = AppState.dataVersion || null;
   AppState.token = token;
   localStorage.setItem('lifecare_token', token);
   AppState.user = user;
