@@ -47,6 +47,7 @@ function applyLanguage(lang) {
   AppState.language = lang;
   localStorage.setItem('lifecare_lang', lang);
   document.documentElement.lang = lang;
+  document.title = lang === 'vi' ? 'LifeCare – Cuộc Sống & Sự Cân Bằng' : 'LifeCare – Your Life, Your Balance';
 
   // Update header indicator
   const flagEl = document.getElementById('currentLangFlag');

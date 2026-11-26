@@ -35,7 +35,7 @@
     ['Tối thiểu 6 ký tự', 'At least 6 characters'],
     ['e.g. Nguyễn Văn An', 'e.g. Alex Nguyen'],
     ['e.g. Ngủ 8h, đi bộ hằng ngày, giảm căng thẳng', 'e.g. Sleep 8h, walk daily, reduce stress'],
-    ['Switch Language / Đổi ngôn ngữ', 'Switch Language'],
+    ['Đổi ngôn ngữ', 'Switch language'],
     ['Đã đăng xuất.', 'Signed out.'],
     ['Phiên khách đã kết thúc.', 'Guest session ended.'],
 
@@ -135,6 +135,7 @@
     ['Xóa nhiều kế hoạch cùng một lúc', 'Delete several plans at once'],
     ['Chọn các kế hoạch muốn xóa trong tuần này.', 'Choose which plans to delete this week.'],
     ['Khung giờ cố định (ngủ, ăn, đi học...) không bị xóa.', 'Fixed time blocks (sleep, meals, school...) are not deleted.'],
+    ['Kéo thả công việc sang ngày hoặc giờ khác để sắp xếp lại. Khung giờ cố định không di chuyển được.', 'Drag a task to another day or time to rearrange it. Fixed time blocks cannot be moved.'],
     ['Chọn tất cả', 'Select all'],
     ['← Quay lại', '← Back'],
     ['Xóa mục đã chọn', 'Delete selected'],

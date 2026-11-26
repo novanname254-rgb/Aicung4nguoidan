@@ -331,23 +331,162 @@ function renderRoutineGrid(grid, days) {
         ${days.map(d => `
           <div class="rw-col ${d.date === today ? 'today' : ''}">
             <div class="rw-head">${DAY_SHORT[d.weekday]}<small>${fmtDM(d.date)}</small></div>
-            <div class="rw-body">
+            <div class="rw-body" data-date="${d.date}">
               ${d.blocks.map(b => `<div class="rw-block blk-${b.block_type}" style="${pos(b.start, b.end)}" title="${escapeHTML(b.label || '')} ${b.start}–${b.end}"><span>${BLOCK_META[b.block_type]?.icon || ''} ${escapeHTML(b.label || '')}</span></div>`).join('')}
               ${d.disruptions.map(x => `<div class="rw-disruption" style="${x.start_time ? pos(x.start_time, x.end_time) : `top:0;height:${H}px`}" title="${DISRUPTION_META[x.kind]?.label}"></div>`).join('')}
-              ${d.tasks.filter(t => t.start_time && t.end_time).map(t => `<button type="button" class="rw-task ${t.status === 'completed' ? 'done' : ''}" style="${pos(t.start_time, t.end_time)}" data-edit-task="${t.id}" title="${escapeHTML(t.title)} ${t.start_time}–${t.end_time}"><span>${escapeHTML(t.title)}</span></button>`).join('')}
+              ${d.tasks.filter(t => t.start_time && t.end_time).map(t => `<button type="button" class="rw-task ${t.status === 'completed' ? 'done' : ''}" style="${pos(t.start_time, t.end_time)}" data-edit-task="${t.id}" title="${escapeHTML(t.title)} ${t.start_time}–${t.end_time} · ${L('Kéo để đổi ngày/giờ', 'Drag to move')}"><span>${escapeHTML(t.title)}</span></button>`).join('')}
               ${d.date === today ? `<div class="rw-now" style="top:${nowTop}px"></div>` : ''}
             </div>
           </div>`).join('')}
       </div>
     </div>`;
   const allTasks = days.flatMap(d => d.tasks);
-  grid.querySelectorAll('[data-edit-task]').forEach(b => b.addEventListener('click', () => {
-    const t = allTasks.find(x => x.id === b.dataset.editTask);
-    if (t) openTaskModal(t);
-  }));
-  // Cuộn tới khoảng 6h sáng để thấy phần ngày hoạt động
+  grid.querySelectorAll('[data-edit-task]').forEach(b => {
+    b.addEventListener('click', () => {
+      if (Date.now() < routineDragClickGuard) return; // vừa kéo xong, không mở form sửa
+      const t = allTasks.find(x => x.id === b.dataset.editTask);
+      if (t) openTaskModal(t);
+    });
+    b.addEventListener('pointerdown', e => startRoutineDrag(e, b, grid, allTasks));
+  });
+  // Giữ nguyên vị trí cuộn sau khi kéo thả; lần đầu cuộn tới khoảng 6h sáng
   const sc = grid.querySelector('.rw-scroll');
-  if (sc) sc.scrollTop = 6 * 60 * PX_PER_MIN - 10;
+  if (sc) sc.scrollTop = routineKeepScroll != null ? routineKeepScroll : 6 * 60 * PX_PER_MIN - 10;
+  routineKeepScroll = null;
+}
+
+// ---------------------------------------------------------------- kéo thả kế hoạch trong lưới tuần
+// Kéo một công việc sang cột ngày khác và/hoặc lên xuống để đổi giờ (bước 15 phút, giữ nguyên thời lượng).
+// Dùng pointer events nên chạy được cả chuột lẫn màn hình cảm ứng. Khung giờ cố định không kéo được.
+const DRAG_SNAP_MIN = 15;
+let routineDrag = null;
+let routineDragClickGuard = 0;
+let routineKeepScroll = null;
+
+function startRoutineDrag(e, el, grid, allTasks) {
+  if (e.button !== 0 || routineDrag) return;
+  const task = allTasks.find(t => t.id === el.dataset.editTask);
+  if (!task) return;
+  const s = hmToMin(task.start_time);
+  let dur = (task.end_time === '24:00' ? 1440 : hmToMin(task.end_time)) - s;
+  if (!(dur > 0)) dur = 60;
+  const rect = el.getBoundingClientRect();
+  routineDrag = {
+    el, task, grid, dur, active: false,
+    fromDate: task.date || el.closest('.rw-body')?.dataset.date,
+    x0: e.clientX, y0: e.clientY,
+    offX: e.clientX - rect.left, offY: e.clientY - rect.top,
+    w: rect.width, h: rect.height,
+    ghost: null, preview: null, target: null
+  };
+  window.addEventListener('pointermove', onRoutineDragMove);
+  window.addEventListener('pointerup', onRoutineDragEnd);
+  window.addEventListener('pointercancel', cancelRoutineDrag);
+  window.addEventListener('keydown', onRoutineDragKey);
+}
+
+function activateRoutineDrag() {
+  const d = routineDrag;
+  d.active = true;
+  d.ghost = d.el.cloneNode(true);
+  d.ghost.removeAttribute('data-edit-task');
+  d.ghost.classList.add('rw-task-ghost');
+  Object.assign(d.ghost.style, { width: `${d.w}px`, height: `${d.h}px`, top: '0', left: '0' });
+  document.body.appendChild(d.ghost);
+  d.preview = document.createElement('div');
+  d.preview.className = 'rw-drop-preview';
+  d.el.classList.add('dragging');
+  document.body.classList.add('rw-dragging');
+}
+
+function onRoutineDragMove(e) {
+  const d = routineDrag;
+  if (!d) return;
+  if (!d.active) {
+    if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
+    activateRoutineDrag();
+  }
+  e.preventDefault();
+  d.ghost.style.transform = `translate(${e.clientX - d.offX}px, ${e.clientY - d.offY}px)`;
+
+  // Tự cuộn lưới khi kéo gần mép trên/dưới
+  const sc = d.grid.querySelector('.rw-scroll');
+  if (sc) {
+    const r = sc.getBoundingClientRect();
+    if (e.clientY < r.top + 48) sc.scrollTop -= 14;
+    else if (e.clientY > r.bottom - 32) sc.scrollTop += 14;
+  }
+
+  // Cột ngày nằm dưới con trỏ (theo chiều ngang)
+  const body = [...d.grid.querySelectorAll('.rw-body')].find(b => {
+    const r = b.getBoundingClientRect();
+    return e.clientX >= r.left && e.clientX < r.right;
+  });
+  if (!body) {
+    d.target = null;
+    d.preview.remove();
+    return;
+  }
+  const top = e.clientY - d.offY - body.getBoundingClientRect().top;
+  let start = Math.round(top / PX_PER_MIN / DRAG_SNAP_MIN) * DRAG_SNAP_MIN;
+  start = Math.max(0, Math.min(1440 - d.dur, start));
+  const end = start + d.dur;
+  d.target = { date: body.dataset.date, start: minToHM(start), end: end >= 1440 ? '24:00' : minToHM(end) };
+  if (d.preview.parentNode !== body) body.appendChild(d.preview);
+  Object.assign(d.preview.style, { top: `${start * PX_PER_MIN}px`, height: `${Math.max(10, d.dur * PX_PER_MIN)}px` });
+  d.preview.textContent = `${d.target.start}–${d.target.end}`;
+}
+
+function endRoutineDragUI() {
+  const d = routineDrag;
+  window.removeEventListener('pointermove', onRoutineDragMove);
+  window.removeEventListener('pointerup', onRoutineDragEnd);
+  window.removeEventListener('pointercancel', cancelRoutineDrag);
+  window.removeEventListener('keydown', onRoutineDragKey);
+  if (d && d.active) {
+    d.ghost.remove();
+    d.preview.remove();
+    d.el.classList.remove('dragging');
+    document.body.classList.remove('rw-dragging');
+    routineDragClickGuard = Date.now() + 400;
+  }
+  routineDrag = null;
+}
+
+function cancelRoutineDrag() { endRoutineDragUI(); }
+function onRoutineDragKey(e) { if (e.key === 'Escape') cancelRoutineDrag(); }
+
+async function onRoutineDragEnd() {
+  const d = routineDrag;
+  if (!d) return;
+  const { task, target, active } = d;
+  endRoutineDragUI();
+  if (!active || !target) return; // chỉ là một lần bấm -> để sự kiện click mở form sửa
+  if (target.date === d.fromDate &&target.start === task.start_time && target.end === task.end_time) return;
+
+  // Cập nhật ngay trên giao diện rồi mới lưu lên máy chủ
+  const sc = d.grid.querySelector('.rw-scroll');
+  const body = d.grid.querySelector(`.rw-body[data-date="${target.date}"]`);
+  if (body) {
+    d.el.style.top = `${hmToMin(target.start) * PX_PER_MIN}px`;
+    body.appendChild(d.el);
+  }
+  try {
+    await apiRequest(`/api/tasks/${encodeURIComponent(task.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ date: target.date, start_time: target.start, end_time: target.end })
+    });
+    const cached = AppState.tasks.find(t => t.id === task.id);
+    if (cached) Object.assign(cached, { date: target.date, start_time: target.start, end_time: target.end });
+    showToast(L(
+      `Đã chuyển "${task.title}" sang ${DAY_SHORT[dayKeyOf(target.date)]} ${fmtDM(target.date)}, ${target.start}–${target.end}.`,
+      `Moved "${task.title}" to ${DAY_SHORT[dayKeyOf(target.date)]} ${fmtDM(target.date)}, ${target.start}–${target.end}.`
+    ), 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+  routineKeepScroll = sc ? sc.scrollTop : null;
+  loadRoutine();
 }
 
 function renderBlockList() {

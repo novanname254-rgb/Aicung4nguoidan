@@ -166,7 +166,7 @@ const I18N = {
     recordMoodBtn: "Lưu Phản Chiếu Cảm Xúc",
     supportiveThoughtTitle: "Thông Điệp Chữa Lành Dành Cho Bạn",
     mentalDisclaimer: "Cam kết an toàn: Tính năng này chỉ dùng để tự chiêm nghiệm, không dùng điểm số để gán nhãn hay chẩn đoán rối loạn tâm lý. Nếu bạn đang rơi vào khủng hoảng hoặc có ý nghĩ tiêu cực, hãy gọi ngay đường dây nóng khẩn cấp 1900 9095 hoặc 115.",
-    moodCalendarTitle: "Lịch Theo Dõi Cảm Xúc (Mood Calendar)",
+    moodCalendarTitle: "Lịch Theo Dõi Cảm Xúc",
     weeklyEmotionalSummary: "Tóm Tắt Cảm Xúc Tuần Qua",
 
     // AI Wellness Assistant
