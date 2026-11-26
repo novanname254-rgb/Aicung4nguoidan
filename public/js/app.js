@@ -87,6 +87,11 @@ async function apiRequest(endpoint, options = {}) {
     });
     const data = await res.json();
     if (!res.ok) {
+      // 401 có thể do instance server chưa kịp cập nhật phiên mới: thử lại một lần trước khi đăng xuất.
+      if (res.status === 401 && AppState.token && !options._retried && !endpoint.startsWith('/api/auth/')) {
+        await new Promise(r => setTimeout(r, 400));
+        return apiRequest(endpoint, { ...options, _retried: true });
+      }
       if (res.status === 401 && AppState.token) {
         const wasGuest = AppState.user && AppState.user.is_guest;
         AppState.token = '';

@@ -73,7 +73,17 @@ async function getAuthUser(req) {
     if (match) token = match[1];
   }
   // Không còn tự dùng chung tài khoản demo: phải đăng nhập hoặc chọn tài khoản khách.
-  const user = token ? await getUserFromSession(token) : null;
+  let user = token ? await getUserFromSession(token) : null;
+  if (token && !user) {
+    // Trên Vercel có nhiều instance: phiên có thể vừa được tạo ở instance khác và đã ghi lên
+    // Google Sheet, còn instance này đang giữ bản cũ. Buộc kiểm tra Sheet rồi thử lại một lần.
+    try {
+      await getDb().syncFromStore({ force: true });
+      user = await getUserFromSession(token);
+    } catch (err) {
+      console.warn('[LifeCare Auth] Session re-sync failed:', err.message);
+    }
+  }
   return user ? { ...user, is_guest: isGuestId(user.id) } : null;
 }
 
