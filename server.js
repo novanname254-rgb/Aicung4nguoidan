@@ -78,7 +78,7 @@ async function getAuthUser(req) {
     // Trên Vercel có nhiều instance: phiên có thể vừa được tạo ở instance khác và đã ghi lên
     // Google Sheet, còn instance này đang giữ bản cũ. Buộc kiểm tra Sheet rồi thử lại một lần.
     try {
-      await getDb().syncFromStore({ force: true });
+      await getDb().syncFromStore({ force: true, unknownSession: true });
       user = await getUserFromSession(token);
     } catch (err) {
       console.warn('[LifeCare Auth] Session re-sync failed:', err.message);
@@ -108,10 +108,15 @@ async function handleRequest(req, res) {
 
   try {
     await ensureServerInit();
-    await getDb().syncFromStore({ force: req.method !== 'GET' });
   } catch (err) {
     console.error('[LifeCare Server] Storage error:', err.message);
     return sendJSON(res, 503, { success: false, message: 'Không kết nối được nơi lưu dữ liệu: ' + err.message });
+  }
+  try {
+    await getDb().syncFromStore({ force: req.method !== 'GET' });
+  } catch (err) {
+    // Sheet tạm bận (VD vượt hạn mức đọc): vẫn phục vụ bằng dữ liệu đang có trong bộ nhớ.
+    console.warn('[LifeCare Server] Sync skipped:', err.message);
   }
 
   let pending = null;

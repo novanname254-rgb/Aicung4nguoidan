@@ -225,6 +225,7 @@ const state = {
   lastVersionCheck: 0,
   persistChain: Promise.resolve(),
   lastSavedHash: null, // bỏ qua lần ghi nếu dữ liệu cần lưu không đổi
+  syncPromise: null,
   columns: {} // bảng -> danh sách cột hiện tại
 };
 
@@ -365,15 +366,23 @@ async function persist() {
 }
 
 /** Nạp lại nếu một instance khác (Vercel) vừa ghi phiên bản mới. force = kiểm tra ngay, bỏ qua bộ đệm 15 giây. */
-async function syncFromStore({ force = false } = {}) {
+async function syncFromStore({ force = false, unknownSession = false } = {}) {
   if (store.kind !== 'google-sheet' || state.dirty) return;
-  if (!force && Date.now() - state.lastVersionCheck < 15_000) return;
-  const remote = await store.getVersion();
-  state.lastVersionCheck = Date.now();
-  if (remote && remote !== state.version) {
-    console.log('[LifeCare DB] Phát hiện dữ liệu mới trên Google Sheet, đang nạp lại...');
-    await loadSnapshot(await store.load(TABLES));
-  }
+  const age = Date.now() - state.lastVersionCheck;
+  // Google Sheets chỉ cho ~60 lượt đọc/phút: yêu cầu đọc kiểm tra tối đa 15 giây/lần, yêu cầu ghi
+  // tối đa 2 giây/lần, mã phiên lạ (có thể vừa tạo ở instance khác) tối đa 1 giây/lần;
+  // các yêu cầu đồng thời dùng chung một lần kiểm tra.
+  if (age < (unknownSession ? 1_000 : force ? 2_000 : 15_000)) return;
+  if (state.syncPromise) return state.syncPromise;
+  state.syncPromise = (async () => {
+    const remote = await store.getVersion();
+    state.lastVersionCheck = Date.now();
+    if (remote && remote !== state.version) {
+      console.log('[LifeCare DB] Phát hiện dữ liệu mới trên Google Sheet, đang nạp lại...');
+      await loadSnapshot(await store.load(TABLES));
+    }
+  })().finally(() => { state.syncPromise = null; });
+  return state.syncPromise;
 }
 
 async function initDatabase() {

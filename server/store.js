@@ -99,13 +99,18 @@ class GoogleSheetStore {
     return this._token;
   }
 
-  async api(method, urlPath, body) {
+  async api(method, urlPath, body, attempt = 0) {
     const res = await fetch(`${SHEETS_API}/${this.sheetId}${urlPath}`, {
       method,
       headers: { Authorization: `Bearer ${await this.accessToken()}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(20000)
     });
+    // Vượt hạn mức (60 lượt/phút) hoặc Google tạm lỗi: đợi rồi thử lại tối đa 3 lần.
+    if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+      await new Promise(r => setTimeout(r, 1500 * 2 ** attempt));
+      return this.api(method, urlPath, body, attempt + 1);
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = data.error?.message || res.statusText;

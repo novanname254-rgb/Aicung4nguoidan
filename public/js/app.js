@@ -89,7 +89,7 @@ async function apiRequest(endpoint, options = {}) {
     if (!res.ok) {
       // 401 có thể do instance server chưa kịp cập nhật phiên mới: thử lại một lần trước khi đăng xuất.
       if (res.status === 401 && AppState.token && !options._retried && !endpoint.startsWith('/api/auth/')) {
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 1200));
         return apiRequest(endpoint, { ...options, _retried: true });
       }
       if (res.status === 401 && AppState.token) {
