@@ -224,8 +224,13 @@ const state = {
   version: null,
   lastVersionCheck: 0,
   persistChain: Promise.resolve(),
+  lastSavedHash: null, // bỏ qua lần ghi nếu dữ liệu cần lưu không đổi
   columns: {} // bảng -> danh sách cột hiện tại
 };
+
+// Tài khoản khách (id bắt đầu "guest_") không bao giờ được ghi ra Google Sheet / JSON.
+const GUEST_FILTER = t => (t === 'users' ? "id NOT LIKE 'guest\\_%' ESCAPE '\\'" : "user_id NOT LIKE 'guest\\_%' ESCAPE '\\'");
+const GUEST_ONLY = t => (t === 'users' ? "id LIKE 'guest\\_%' ESCAPE '\\'" : "user_id LIKE 'guest\\_%' ESCAPE '\\'");
 
 const WRITE_RE = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 // libSQL không nhận undefined: đổi thành NULL (COALESCE(?, cột) giữ nguyên giá trị cũ).
@@ -286,6 +291,12 @@ function upgradeLegacyRows(table, columns, rows) {
 
 async function loadSnapshot(snapshot) {
   await client.execute('PRAGMA foreign_keys = OFF');
+  // Giữ lại dữ liệu khách đang dùng (không có trong Sheet) rồi mới thay phần còn lại.
+  const guestRows = {};
+  for (const t of TABLES) {
+    const rs = await client.execute(`SELECT * FROM ${t} WHERE ${GUEST_ONLY(t)}`);
+    guestRows[t] = rs.rows.map(r => ({ ...r }));
+  }
   for (const t of [...TABLES].reverse()) await client.execute(`DELETE FROM ${t}`);
   for (const t of TABLES) {
     const saved = snapshot?.tables?.[t];
@@ -298,18 +309,35 @@ async function loadSnapshot(snapshot) {
       await client.batch(objects.slice(i, i + 200).map(o => ({ sql, args: cols.map(c => o[c] ?? null) })), 'write');
     }
   }
+  for (const t of TABLES) {
+    const rows = guestRows[t];
+    if (!rows.length) continue;
+    const cols = Object.keys(rows[0]);
+    const sql = `INSERT OR REPLACE INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
+    await client.batch(rows.map(o => ({ sql, args: cols.map(c => o[c] ?? null) })), 'write');
+  }
   await client.execute('PRAGMA foreign_keys = ON');
   state.version = snapshot?.version ?? null;
+  state.lastSavedHash = (await dumpPlain()).hash;
   state.dirty = false;
 }
 
-async function dumpSnapshot() {
+/** Dữ liệu cần lưu (chưa mã hoá, đã bỏ tài khoản khách) + mã băm để biết có thay đổi không. */
+async function dumpPlain() {
+  const plain = {};
+  for (const t of TABLES) {
+    const cols = state.columns[t];
+    const rs = await client.execute(`SELECT ${cols.join(', ')} FROM ${t} WHERE ${GUEST_FILTER(t)} ORDER BY rowid`);
+    plain[t] = rs.rows.map(r => ({ ...r }));
+  }
+  return { plain, hash: crypto.createHash('sha256').update(JSON.stringify(plain)).digest('hex') };
+}
+
+function encryptSnapshot(plain) {
   const tables = {};
   for (const t of TABLES) {
     const cols = state.columns[t];
-    const rs = await client.execute(`SELECT ${cols.join(', ')} FROM ${t}`);
-    const rows = encryptRows(t, rs.rows.map(r => ({ ...r })));
-    tables[t] = { columns: cols, rows: rows.map(o => cols.map(c => o[c] ?? null)) };
+    tables[t] = { columns: cols, rows: encryptRows(t, plain[t]).map(o => cols.map(c => o[c] ?? null)) };
   }
   return { version: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`, savedAt: new Date().toISOString(), tables };
 }
@@ -320,9 +348,12 @@ async function persist() {
     if (!state.dirty) return;
     state.dirty = false;
     try {
-      const snapshot = await dumpSnapshot();
+      const { plain, hash } = await dumpPlain();
+      if (hash === state.lastSavedHash) return; // chỉ dữ liệu khách thay đổi: không cần ghi
+      const snapshot = encryptSnapshot(plain);
       await store.save(snapshot);
       state.version = snapshot.version;
+      state.lastSavedHash = hash;
       state.lastVersionCheck = Date.now();
     } catch (err) {
       state.dirty = true; // lần sau thử lại
@@ -354,6 +385,7 @@ async function initDatabase() {
       await readColumns();
       const snapshot = await store.load(TABLES);
       if (snapshot) await loadSnapshot(snapshot);
+      else state.lastSavedHash = null;
       state.lastVersionCheck = Date.now();
       console.log(`[LifeCare DB] Lưu trữ: ${store.describe()} (${snapshot ? 'đã nạp dữ liệu' : 'chưa có dữ liệu'})`);
       state.initialized = true;

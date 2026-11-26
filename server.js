@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 
 const { getDb, initDatabase, hashPassword, verifyPassword } = require('./server/db');
 const P = require('./server/planning');
-const { ensureDemoUser, getDefaultUser, createSession, getUserFromSession, deleteSession } = require('./server/auth');
+const { ensureDemoUser, createGuestUser, isGuestId, createSession, getUserFromSession, deleteSession } = require('./server/auth');
 const { checkCrisisOrEmergency, generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
 const { generateLLMReply, isLLMConfigured } = require('./server/llm-assistant');
 
@@ -72,12 +72,9 @@ async function getAuthUser(req) {
     const match = req.headers['cookie'].match(/lifecare_session=([^;]+)/);
     if (match) token = match[1];
   }
-  if (token && token !== 'guest_token_lifecare') {
-    const user = await getUserFromSession(token);
-    if (user) return user;
-  }
-  // BYPASS: Temporarily remove requirement for email login
-  return await getDefaultUser();
+  // Không còn tự dùng chung tài khoản demo: phải đăng nhập hoặc chọn tài khoản khách.
+  const user = token ? await getUserFromSession(token) : null;
+  return user ? { ...user, is_guest: isGuestId(user.id) } : null;
 }
 
 // Múi giờ của người dùng: trình duyệt gửi header X-Timezone (VD Asia/Ho_Chi_Minh).
@@ -124,6 +121,25 @@ async function handleRequest(req, res) {
   }
   if (pending && pending.head) realRes.writeHead(...pending.head);
   realRes.end(...((pending && pending.body) || []));
+}
+
+/**
+ * Chuyển dữ liệu của một tài khoản khách sang tài khoản thật vừa đăng ký, rồi xoá tài khoản khách.
+ * Sau bước này dữ liệu không còn mang mã "guest_" nên sẽ được lưu (mã hoá) ra Google Sheet / JSON.
+ */
+async function migrateGuestData(guest, newUserId) {
+  const db = getDb();
+  const tables = ['user_settings', 'goals', 'tasks', 'progress_logs', 'routine_blocks', 'disruptions',
+    'health_checkins', 'mood_checkins', 'notifications', 'ai_chats'];
+  await db.prepare('DELETE FROM sessions WHERE user_id = ?').run(guest.id);
+  await db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(guest.id);
+  for (const t of tables) {
+    await db.prepare(`UPDATE ${t} SET user_id = ? WHERE user_id = ?`).run(newUserId, guest.id);
+  }
+  await db.prepare('UPDATE user_settings SET id = ? WHERE user_id = ?').run('set_' + newUserId, newUserId);
+  // Giữ tâm lý nền khách đã đặt (nếu người dùng chưa điền gì khi đăng ký)
+  await db.prepare('UPDATE users SET psych_profile = COALESCE(psych_profile, ?) WHERE id = ?').run(guest.psych_profile || null, newUserId);
+  await db.prepare('DELETE FROM users WHERE id = ?').run(guest.id);
 }
 
 let _serverInitialized = false;
@@ -199,20 +215,31 @@ async function routeRequest(req, res) {
           now
         );
 
-        // Create default settings
-        await db.prepare(`
-          INSERT INTO user_settings (id, user_id, theme, language, updated_at)
-          VALUES (?, ?, 'light', 'en', ?)
-        `).run('set_' + crypto.randomUUID(), userId, now);
+        // Đang là tài khoản khách và muốn giữ dữ liệu: chuyển toàn bộ dữ liệu khách sang tài khoản mới.
+        let migrated = false;
+        const current = await getAuthUser(req);
+        if (current && current.is_guest && body.keep_guest_data !== false) {
+          await migrateGuestData(current, userId);
+          migrated = true;
+        }
+
+        // Create default settings (nếu chưa có từ dữ liệu khách)
+        if (!(await db.prepare('SELECT id FROM user_settings WHERE user_id = ?').get(userId))) {
+          await db.prepare(`
+            INSERT INTO user_settings (id, user_id, theme, language, updated_at)
+            VALUES (?, ?, 'light', 'vi', ?)
+          `).run('set_' + crypto.randomUUID(), userId, now);
+        }
 
         const { token } = await createSession(userId);
         const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at FROM users WHERE id = ?').get(userId);
 
         return sendJSON(res, 201, {
           success: true,
-          message: 'Registration successful! Welcome to LifeCare.',
+          message: migrated ? 'Đăng ký thành công! Dữ liệu khách đã được chuyển sang và từ giờ sẽ được lưu.' : 'Registration successful! Welcome to LifeCare.',
           token,
-          user
+          user: { ...user, is_guest: false },
+          migratedGuestData: migrated
         });
       }
 
@@ -240,7 +267,9 @@ async function routeRequest(req, res) {
           dob: user.dob,
           gender: user.gender,
           personal_goals: user.personal_goals,
-          created_at: user.created_at
+          psych_profile: user.psych_profile,
+          created_at: user.created_at,
+          is_guest: isGuestId(user.id)
         };
 
         return sendJSON(res, 200, {
@@ -251,11 +280,25 @@ async function routeRequest(req, res) {
         });
       }
 
+      // POST /api/auth/guest – tài khoản khách: dùng ngay, KHÔNG lưu dữ liệu (xem server/auth.js)
+      if (pathname === '/api/auth/guest' && method === 'POST') {
+        const body = await parseBody(req);
+        const guestId = await createGuestUser({ withSampleData: body.sample_data !== false });
+        const { token } = await createSession(guestId);
+        const user = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at FROM users WHERE id = ?').get(guestId);
+        return sendJSON(res, 201, { success: true, message: 'Đang dùng tài khoản khách. Dữ liệu sẽ không được lưu.', token, user: { ...user, is_guest: true } });
+      }
+
       // POST /api/auth/logout
       if (pathname === '/api/auth/logout' && method === 'POST') {
         const authHeader = req.headers['authorization'] || '';
         const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
-        if (token) await deleteSession(token);
+        const user = token ? await getUserFromSession(token) : null;
+        if (user && isGuestId(user.id)) {
+          await db.prepare('DELETE FROM users WHERE id = ?').run(user.id); // xoá sạch dữ liệu khách
+        } else if (token) {
+          await deleteSession(token);
+        }
         return sendJSON(res, 200, { success: true, message: 'Logged out successfully.' });
       }
 
@@ -308,8 +351,9 @@ async function routeRequest(req, res) {
 
       // GET /api/auth/me
       if (pathname === '/api/auth/me' && method === 'GET') {
-        const user = (await getAuthUser(req)) || (await getDefaultUser());
-        return sendJSON(res, 200, { success: true, user, token: 'guest_token_lifecare' });
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Chưa đăng nhập.' });
+        return sendJSON(res, 200, { success: true, user });
       }
 
       // PUT /api/user/profile

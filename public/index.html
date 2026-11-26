@@ -33,13 +33,14 @@
           <h3 id="authModalTitle" data-i18n="signInTitle">Đăng Nhập LifeCare</h3>
           <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;" data-i18n="brandTagline">Cuộc Sống & Sự Cân Bằng</p>
         </div>
-        <button class="modal-close" id="authModalClose">✕</button>
+        <button class="modal-close" id="authModalClose" style="display: none;">✕</button>
       </div>
 
       <!-- Login Form -->
       <form id="loginForm">
-        <div style="background: rgba(108, 156, 232, 0.12); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 0.85rem; color: var(--primary);">
-          ✨ <strong>Chế độ mở:</strong> Đã tạm thời bỏ yêu cầu đăng nhập bằng email. Bạn có thể sử dụng ngay mà không cần tài khoản!
+        <div class="auth-choice-note">
+          🔐 <strong>Đăng nhập / Đăng ký</strong>: dữ liệu được lưu và mã hoá.<br/>
+          👤 <strong>Tài khoản khách</strong>: dùng thử ngay, <strong>không lưu dữ liệu</strong>.
         </div>
         <div class="form-group">
           <label data-i18n="email">Địa chỉ Email</label>
@@ -56,7 +57,9 @@
           <a href="#" id="showForgotLink" style="color: var(--primary); text-decoration: none; font-weight: 600;" data-i18n="forgotPassword">Quên mật khẩu?</a>
         </div>
         <button type="submit" class="btn btn-primary" style="width: 100%;" data-i18n="signInBtn">Đăng Nhập</button>
-        <button type="button" id="skipAuthBtn" class="btn btn-outline" style="width: 100%; margin-top: 10px;">⚡ Sử dụng ngay không cần đăng nhập</button>
+        <div class="auth-divider"><span>hoặc</span></div>
+        <button type="button" id="skipAuthBtn" class="btn btn-secondary" style="width: 100%;">👤 Dùng tài khoản khách (không lưu dữ liệu)</button>
+        <label class="inline-check" style="margin-top: 8px; font-size: 0.8rem;"><input type="checkbox" id="guestSampleData" checked /> Có sẵn dữ liệu mẫu để xem thử</label>
         <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
           <span data-i18n="createOneFree">Chưa có tài khoản?</span> <a href="#" id="showRegisterLink" style="color: var(--primary); font-weight: 700; text-decoration: none;" data-i18n="createAccountBtn">Đăng ký ngay</a>
         </p>
@@ -64,6 +67,9 @@
 
       <!-- Register Form -->
       <form id="registerForm" style="display: none;">
+        <label class="inline-check guest-migrate-row" id="guestMigrateRow" style="display: none;">
+          <input type="checkbox" id="regKeepGuestData" checked /> Chuyển dữ liệu đang dùng thử (tài khoản khách) sang tài khoản mới
+        </label>
         <div class="form-group">
           <label data-i18n="fullName">Họ và tên</label>
           <input type="text" id="regFullName" class="form-control" placeholder="e.g. Nguyễn Văn An" required />
@@ -242,6 +248,12 @@
           </button>
         </div>
       </header>
+
+      <!-- Dải thông báo khi đang dùng tài khoản khách -->
+      <div class="guest-banner" id="guestBanner" style="display: none;">
+        <span>👤 Bạn đang dùng <strong>tài khoản khách</strong>: dữ liệu <strong>không được lưu</strong> và sẽ mất khi đăng xuất hoặc sau 24 giờ.</span>
+        <button type="button" class="btn btn-primary small" id="guestRegisterBtn">Tạo tài khoản để lưu</button>
+      </div>
 
       <!-- PAGE CONTENT SECTIONS -->
       <main class="page-content">

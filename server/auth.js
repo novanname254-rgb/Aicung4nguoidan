@@ -74,6 +74,9 @@ async function getDefaultUser() {
 
 async function seedInitialDemoData(userId) {
   const db = getDb();
+  // Mã bản ghi mẫu: tài khoản demo giữ mã cũ, tài khoản khách thêm hậu tố riêng để không trùng.
+  const sid = base => (userId === DEFAULT_USER_ID ? base : `${base}_${userId.slice(-12)}`);
+  const GOAL_ID = sid('goal_demo_1');
   // Ngày theo múi giờ người dùng (không dùng UTC, tránh lệch ngày trước 7h sáng ở Việt Nam)
   const todayStr = P.localNow().date;
   const getDateStr = (offsetDays) => P.addDays(todayStr, -offsetDays);
@@ -81,7 +84,7 @@ async function seedInitialDemoData(userId) {
   // Seed tasks for today and upcoming
   const tasks = [
     {
-      id: 'task_demo_1',
+      id: sid('task_demo_1'),
       title: 'Morning Yoga & Breathing Meditation',
       description: 'Gentle 20-min vinyasa stretch and 4-7-8 deep breathing routine',
       category: 'Exercise',
@@ -92,7 +95,7 @@ async function seedInitialDemoData(userId) {
       status: 'completed'
     },
     {
-      id: 'task_demo_2',
+      id: sid('task_demo_2'),
       title: 'Review System Architecture Paper',
       description: 'Analyze distributed database trade-offs and draft summary notes',
       category: 'Study',
@@ -103,7 +106,7 @@ async function seedInitialDemoData(userId) {
       status: 'completed'
     },
     {
-      id: 'task_demo_3',
+      id: sid('task_demo_3'),
       title: 'Mindful Lunch & Hydration Break',
       description: 'Eat away from screens and drink a large glass of water',
       category: 'Rest',
@@ -114,7 +117,7 @@ async function seedInitialDemoData(userId) {
       status: 'completed'
     },
     {
-      id: 'task_demo_4',
+      id: sid('task_demo_4'),
       title: 'Team Product Sync & Standup',
       description: 'Align on sprint deliverables and unblock dependencies',
       category: 'Work',
@@ -125,7 +128,7 @@ async function seedInitialDemoData(userId) {
       status: 'pending'
     },
     {
-      id: 'task_demo_5',
+      id: sid('task_demo_5'),
       title: 'Evening Walk in Community Park',
       description: 'Unwind without phone, get fresh air and sunshine',
       category: 'Personal',
@@ -136,7 +139,7 @@ async function seedInitialDemoData(userId) {
       status: 'pending'
     },
     {
-      id: 'task_demo_6',
+      id: sid('task_demo_6'),
       title: 'Reflect & Journal in LifeCare',
       description: 'Write down 3 things I am grateful for and log mood',
       category: 'Rest',
@@ -147,7 +150,7 @@ async function seedInitialDemoData(userId) {
       status: 'pending'
     },
     {
-      id: 'task_demo_7',
+      id: sid('task_demo_7'),
       title: 'Submit Bi-weekly Lab Report',
       description: 'Finalize references and submit PDF to portal',
       category: 'Study',
@@ -158,7 +161,7 @@ async function seedInitialDemoData(userId) {
       status: 'completed'
     },
     {
-      id: 'task_demo_8',
+      id: sid('task_demo_8'),
       title: '30-minute Cardio Cycling',
       description: 'Indoor trainer session maintaining zone 2 cardio',
       category: 'Exercise',
@@ -169,7 +172,7 @@ async function seedInitialDemoData(userId) {
       status: 'completed'
     },
     {
-      id: 'task_demo_9',
+      id: sid('task_demo_9'),
       title: 'Grocery Restock: Fresh Greens & Fruits',
       description: 'Buy berries, spinach, almonds and oat milk',
       category: 'Personal',
@@ -207,7 +210,7 @@ async function seedInitialDemoData(userId) {
         INSERT OR IGNORE INTO health_checkins (id, user_id, checkin_date, sleep_duration, sleep_quality, physical_condition, energy_level, exercise_status, water_ml, discomfort, notes, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
-        `health_demo_${h.days}`,
+        sid(`health_demo_${h.days}`),
         userId,
         getDateStr(h.days),
         h.sleep,
@@ -239,7 +242,7 @@ async function seedInitialDemoData(userId) {
         INSERT OR IGNORE INTO mood_checkins (id, user_id, checkin_date, mood, emoji, stress_level, motivation_level, connected_score, relaxed_score, anxiety_score, emotional_notes, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).run(
-        `mood_demo_${m.days}`,
+        sid(`mood_demo_${m.days}`),
         userId,
         getDateStr(m.days),
         m.mood,
@@ -259,28 +262,28 @@ async function seedInitialDemoData(userId) {
     const now = new Date().toISOString();
     for (const [i, b] of P.ROUTINE_TEMPLATES.university.entries()) {
       await db.prepare(`INSERT OR IGNORE INTO routine_blocks (id, user_id, block_type, label, start_time, end_time, days, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(`blk_demo_${i}`, userId, b.block_type, b.label, b.start_time, b.end_time, b.days.join(','), now, now);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(sid(`blk_demo_${i}`), userId, b.block_type, b.label, b.start_time, b.end_time, b.days.join(','), now, now);
     }
     await db.prepare(`INSERT OR IGNORE INTO goals (id, user_id, title, description, deadline, estimated_minutes, priority, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'high', 'active', ?, ?)`)
-      .run('goal_demo_1', userId, 'Hoàn thành báo cáo nghiên cứu', 'Báo cáo 20 trang về kiến trúc cơ sở dữ liệu phân tán', getDateStr(-12), 900, getDateStr(5) + 'T08:00:00.000Z', now);
+      .run(GOAL_ID, userId, 'Hoàn thành báo cáo nghiên cứu', 'Báo cáo 20 trang về kiến trúc cơ sở dữ liệu phân tán', getDateStr(-12), 900, getDateStr(5) + 'T08:00:00.000Z', now);
     const goalTasks = [
-      ['task_goal_1', 'Đọc và tóm tắt 3 bài báo chính', getDateStr(3), '20:00', '21:30', 90, 'completed'],
-      ['task_goal_2', 'Lập dàn ý báo cáo', getDateStr(1), '20:00', '21:00', 60, 'completed'],
-      ['task_goal_3', 'Viết phần 1: Tổng quan', getDateStr(-1), '20:00', '21:30', 90, 'pending'],
-      ['task_goal_4', 'Viết phần 2: So sánh kiến trúc', getDateStr(-3), '19:45', '21:15', 90, 'pending']
+      [sid('task_goal_1'), 'Đọc và tóm tắt 3 bài báo chính', getDateStr(3), '20:00', '21:30', 90, 'completed'],
+      [sid('task_goal_2'), 'Lập dàn ý báo cáo', getDateStr(1), '20:00', '21:00', 60, 'completed'],
+      [sid('task_goal_3'), 'Viết phần 1: Tổng quan', getDateStr(-1), '20:00', '21:30', 90, 'pending'],
+      [sid('task_goal_4'), 'Viết phần 2: So sánh kiến trúc', getDateStr(-3), '19:45', '21:15', 90, 'pending']
     ];
     for (const [id, title, date, start, end, dur, status] of goalTasks) {
       await db.prepare(`INSERT OR IGNORE INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, goal_id, duration_minutes, deadline, created_at, updated_at)
-        VALUES (?, ?, ?, '', 'Study', 'high', ?, ?, ?, ?, 0, 'goal_demo_1', ?, ?, ?, ?)`)
-        .run(id, userId, title, date, start, end, status, dur, getDateStr(-12), now, now);
+        VALUES (?, ?, ?, '', 'Study', 'high', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`)
+        .run(id, userId, title, date, start, end, status, GOAL_ID, dur, getDateStr(-12), now, now);
       if (status === 'completed') {
         await db.prepare(`INSERT OR IGNORE INTO progress_logs (id, user_id, goal_id, task_id, log_date, minutes, kind, note, created_at)
-          VALUES (?, ?, 'goal_demo_1', ?, ?, ?, 'task_done', ?, ?)`).run('log_' + id, userId, id, date, dur, title, now);
+          VALUES (?, ?, ?, ?, ?, ?, 'task_done', ?, ?)`).run('log_' + id, userId, GOAL_ID, id, date, dur, title, now);
       }
     }
     await db.prepare(`INSERT OR IGNORE INTO progress_logs (id, user_id, goal_id, task_id, log_date, minutes, kind, note, created_at)
-      VALUES ('log_demo_extra', ?, 'goal_demo_1', NULL, ?, 45, 'extra', 'Đọc thêm tài liệu ngoài kế hoạch', ?)`).run(userId, getDateStr(2), now);
+      VALUES (?, ?, ?, NULL, ?, 45, 'extra', 'Đọc thêm tài liệu ngoài kế hoạch', ?)`).run(sid('log_demo_extra'), userId, GOAL_ID, getDateStr(2), now);
   } catch (e) {
     console.warn('[LifeCare Seed] Planning demo data:', e.message);
   }
@@ -291,7 +294,7 @@ async function seedInitialDemoData(userId) {
       INSERT OR IGNORE INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 0, 1, datetime('now'))
     `).run(
-      'notif_demo_1',
+      sid('notif_demo_1'),
       userId,
       'Daily Hydration Check 💧',
       'Drink a fresh glass of water to keep your body vibrant and focused.',
@@ -302,7 +305,7 @@ async function seedInitialDemoData(userId) {
       INSERT OR IGNORE INTO notifications (id, user_id, title, message, notification_type, notification_time, is_read, is_enabled, created_at)
       VALUES (?, ?, ?, ?, ?, ?, 0, 1, datetime('now'))
     `).run(
-      'notif_demo_2',
+      sid('notif_demo_2'),
       userId,
       'Upcoming: Team Product Sync 📅',
       'Starting in 30 minutes at 14:00.',
@@ -310,6 +313,43 @@ async function seedInitialDemoData(userId) {
       '13:30'
     );
   } catch (e) {}
+}
+
+// ------------------------------------------------------------------
+// Tài khoản khách: dùng thử ngay, KHÔNG lưu dữ liệu.
+// Mã người dùng bắt đầu bằng "guest_"; db.js không bao giờ ghi các dòng này ra Google Sheet / JSON.
+// Dữ liệu khách chỉ nằm trong bộ nhớ server và mất khi khách đăng xuất, sau 24 giờ, hoặc khi server khởi động lại.
+// ------------------------------------------------------------------
+const GUEST_PREFIX = 'guest_';
+const GUEST_TTL_MS = 24 * 60 * 60 * 1000;
+const isGuestId = id => typeof id === 'string' && id.startsWith(GUEST_PREFIX);
+
+async function cleanupOldGuests() {
+  const db = getDb();
+  const cutoff = new Date(Date.now() - GUEST_TTL_MS).toISOString();
+  await db.prepare("DELETE FROM users WHERE id LIKE 'guest\\_%' ESCAPE '\\' AND created_at < ?").run(cutoff);
+}
+
+async function createGuestUser({ withSampleData = true } = {}) {
+  const db = getDb();
+  await cleanupOldGuests();
+  const id = GUEST_PREFIX + crypto.randomUUID().replace(/-/g, '');
+  const now = new Date().toISOString();
+  const { hash, salt } = hashPassword(crypto.randomBytes(24).toString('hex')); // không ai đăng nhập lại bằng mật khẩu được
+  await db.prepare(`
+    INSERT INTO users (id, email, password_hash, salt, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
+  `).run(
+    id, `${id}@guest.lifecare.local`, hash, salt, 'Khách',
+    `https://api.dicebear.com/7.x/thumbs/svg?seed=${id}`,
+    'Dùng thử LifeCare',
+    JSON.stringify({ willpower: 3, stress_tolerance: 3, motivation_source: 'Mục tiêu dài hạn', best_focus_time: 'morning', max_focus_minutes: 45, notes: null }),
+    now, now
+  );
+  await db.prepare(`INSERT INTO user_settings (id, user_id, theme, language, updated_at) VALUES (?, ?, 'light', 'vi', ?)`)
+    .run('set_' + id, id, now);
+  if (withSampleData) await seedInitialDemoData(id);
+  return id;
 }
 
 // Session management
@@ -358,6 +398,9 @@ async function deleteSession(token) {
 
 module.exports = {
   ensureDemoUser,
+  createGuestUser,
+  isGuestId,
+  GUEST_PREFIX,
   getDefaultUser,
   createSession,
   getUserFromSession,

@@ -88,9 +88,13 @@ async function apiRequest(endpoint, options = {}) {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 401 && AppState.token) {
+        const wasGuest = AppState.user && AppState.user.is_guest;
         AppState.token = '';
+        AppState.user = null;
         localStorage.removeItem('lifecare_token');
+        updateUserUI();
         showAuthModal(true);
+        if (wasGuest) showToast(L('Phiên khách đã kết thúc. Dữ liệu khách không được lưu lại.', 'Guest session ended; guest data was not kept.'), 'error');
       }
       throw new Error(data.message || 'Request failed');
     }
@@ -135,36 +139,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Apply initial language
   applyLanguage(AppState.language);
 
-  // Check current session
+  // Phiên đăng nhập: có token thì kiểm tra lại, không thì cho người dùng chọn
+  // đăng nhập / đăng ký (có lưu dữ liệu) hoặc tài khoản khách (không lưu).
   if (AppState.token) {
     try {
       const data = await apiRequest('/api/auth/me');
-      AppState.user = data.user;
-      updateUserUI();
-      loadDashboard();
-      afterLoginInit();
+      onSignedIn(data.user, AppState.token);
     } catch (e) {
       showAuthModal(true);
     }
   } else {
-    // Attempt auto-login with demo user if available
-    try {
-      const loginRes = await apiRequest('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({
-          email: 'alex.balance@lifecare.app',
-          password: 'LifeCare2026!'
-        })
-      });
-      AppState.token = loginRes.token;
-      localStorage.setItem('lifecare_token', loginRes.token);
-      AppState.user = loginRes.user;
-      updateUserUI();
-      loadDashboard();
-      afterLoginInit();
-    } catch (err) {
-      showAuthModal(true);
-    }
+    showAuthModal(true);
   }
 });
 
@@ -306,9 +291,13 @@ function navigateToView(viewName) {
 }
 
 function updateUserUI() {
+  const banner = document.getElementById('guestBanner');
+  if (banner) banner.style.display = AppState.user && AppState.user.is_guest ? 'flex' : 'none';
   if (!AppState.user) return;
   document.getElementById('sidebarUserName').innerText = AppState.user.full_name;
-  document.getElementById('sidebarUserEmail').innerText = AppState.user.email;
+  document.getElementById('sidebarUserEmail').innerText = AppState.user.is_guest
+    ? L('Tài khoản khách · không lưu', 'Guest · not saved')
+    : AppState.user.email;
   if (AppState.user.avatar) {
     document.getElementById('sidebarAvatar').src = AppState.user.avatar;
   }
@@ -324,11 +313,26 @@ function bindAuthEvents() {
   }
   const skipBtn = document.getElementById('skipAuthBtn');
   if (skipBtn) {
-    skipBtn.addEventListener('click', () => {
-      showAuthModal(false);
-      showToast(AppState.language === 'vi' ? 'Tiếp tục với chế độ Khách' : 'Continuing as Guest');
+    skipBtn.addEventListener('click', async () => {
+      skipBtn.disabled = true;
+      try {
+        const res = await apiRequest('/api/auth/guest', {
+          method: 'POST',
+          body: JSON.stringify({ sample_data: document.getElementById('guestSampleData').checked })
+        });
+        onSignedIn(res.user, res.token);
+        showToast(L('Đang dùng tài khoản khách. Dữ liệu sẽ không được lưu.', 'Guest mode: nothing will be saved.'));
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        skipBtn.disabled = false;
+      }
     });
   }
+  document.getElementById('guestRegisterBtn')?.addEventListener('click', () => {
+    showAuthModal(true);
+    document.getElementById('showRegisterLink').click();
+  });
   const modal = document.getElementById('authModal');
   const loginForm = document.getElementById('loginForm');
   const registerForm = document.getElementById('registerForm');
@@ -337,6 +341,8 @@ function bindAuthEvents() {
 
   document.getElementById('showRegisterLink').addEventListener('click', (e) => {
     e.preventDefault();
+    // Đang là khách: cho chọn chuyển dữ liệu dùng thử sang tài khoản mới
+    document.getElementById('guestMigrateRow').style.display = AppState.user && AppState.user.is_guest ? 'flex' : 'none';
     loginForm.style.display = 'none';
     registerForm.style.display = 'block';
     forgotForm.style.display = 'none';
@@ -376,13 +382,9 @@ function bindAuthEvents() {
         method: 'POST',
         body: JSON.stringify({ email, password })
       });
-      AppState.token = res.token;
-      localStorage.setItem('lifecare_token', res.token);
-      AppState.user = res.user;
-      updateUserUI();
-      showAuthModal(false);
+      await endGuestSessionIfAny();
+      onSignedIn(res.user, res.token);
       showToast(`${t('greetingMorning')}, ${res.user.full_name}!`);
-      loadDashboard();
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -398,18 +400,18 @@ function bindAuthEvents() {
       const gender = document.getElementById('regGender').value;
       const personal_goals = document.getElementById('regGoals').value;
 
+      const keep_guest_data = document.getElementById('regKeepGuestData').checked;
       const res = await apiRequest('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ full_name, email, password, dob, gender, personal_goals })
+        body: JSON.stringify({ full_name, email, password, dob, gender, personal_goals, keep_guest_data })
       });
 
-      AppState.token = res.token;
-      localStorage.setItem('lifecare_token', res.token);
-      AppState.user = res.user;
-      updateUserUI();
-      showAuthModal(false);
-      showToast(AppState.language === 'vi' ? 'Đăng ký thành công! Chào mừng bạn.' : 'Registration successful! Welcome.');
-      loadDashboard();
+      // Dữ liệu khách đã được chuyển thì server đã xoá tài khoản khách; nếu không thì xoá ở đây.
+      if (!res.migratedGuestData) await endGuestSessionIfAny();
+      onSignedIn(res.user, res.token);
+      showToast(res.migratedGuestData
+        ? L('Đăng ký thành công! Dữ liệu dùng thử đã được chuyển sang và từ giờ sẽ được lưu.', 'Registered! Your trial data was moved over and will now be saved.')
+        : L('Đăng ký thành công! Dữ liệu của bạn từ giờ sẽ được lưu.', 'Registration successful! Your data will be saved.'));
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -431,21 +433,46 @@ function bindAuthEvents() {
   });
 
   document.getElementById('sidebarLogoutBtn').addEventListener('click', async () => {
-    if (confirm(AppState.language === 'vi' ? 'Bạn có chắc chắn muốn đăng xuất?' : 'Are you sure you want to sign out?')) {
+    const isGuest = AppState.user && AppState.user.is_guest;
+    const question = isGuest
+      ? L('Bạn đang dùng tài khoản khách. Đăng xuất sẽ xoá toàn bộ dữ liệu khách. Tiếp tục?', 'Signing out deletes all guest data. Continue?')
+      : L('Bạn có chắc chắn muốn đăng xuất?', 'Are you sure you want to sign out?');
+    if (confirm(question)) {
       try {
         await apiRequest('/api/auth/logout', { method: 'POST' });
       } catch (e) {}
       AppState.token = '';
       AppState.user = null;
       localStorage.removeItem('lifecare_token');
+      updateUserUI();
       showAuthModal(true);
       showToast(AppState.language === 'vi' ? 'Đã đăng xuất.' : 'Signed out.');
     }
   });
 }
 
+function onSignedIn(user, token) {
+  AppState.token = token;
+  localStorage.setItem('lifecare_token', token);
+  AppState.user = user;
+  updateUserUI();
+  showAuthModal(false);
+  loadDashboard();
+  afterLoginInit(); // planning-ui.js: nhắc việc, danh sách mục tiêu
+}
+
+/** Kết thúc phiên khách hiện tại (xoá dữ liệu khách trên server) trước khi đổi tài khoản. */
+async function endGuestSessionIfAny() {
+  if (AppState.user && AppState.user.is_guest && AppState.token) {
+    try { await apiRequest('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  }
+}
+
 function showAuthModal(show) {
   const modal = document.getElementById('authModal');
+  // Chỉ cho đóng khi đã có phiên (đăng nhập hoặc khách); lần đầu phải chọn một cách sử dụng.
+  const closeBtn = document.getElementById('authModalClose');
+  if (closeBtn) closeBtn.style.display = AppState.user ? '' : 'none';
   if (show) modal.classList.add('active');
   else modal.classList.remove('active');
 }

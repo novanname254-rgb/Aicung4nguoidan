@@ -7,8 +7,11 @@
 ## 🌟 Key Capabilities & Architecture
 
 ### 1. User Authentication & Private Data Vault
-- **Chế độ mở (Guest Mode / No-login):** Tạm thời bỏ yêu cầu bắt buộc đăng nhập bằng email. Người dùng có thể trải nghiệm ngay lập tức toàn bộ tính năng của LifeCare (Lập kế hoạch, theo dõi sức khỏe thể chất, cảm xúc, trợ lý AI) dưới chế độ Khách mà không bị chặn bởi form đăng nhập.
-- **Tùy chọn đăng nhập / đăng ký:** Form đăng nhập email và mật khẩu vẫn hoạt động bình thường cho người dùng có nhu cầu lưu trữ tài khoản cá nhân riêng biệt.
+- **Hai cách sử dụng:**
+  - **Đăng nhập / Đăng ký**: dữ liệu được lưu (Google Sheet / JSON) và mã hoá.
+  - **Tài khoản khách**: dùng thử ngay, **không lưu dữ liệu**. Mỗi khách có tài khoản riêng (tuỳ chọn có sẵn dữ liệu mẫu), chỉ nằm trong bộ nhớ server, không bao giờ ghi ra Sheet/JSON. Dữ liệu khách mất khi đăng xuất, sau 24 giờ, hoặc khi server khởi động lại.
+  - Khách muốn giữ lại dữ liệu: bấm **"Tạo tài khoản để lưu"**, đăng ký với tuỳ chọn "Chuyển dữ liệu đang dùng thử". Toàn bộ dữ liệu (công việc, mục tiêu, tiến độ, thời gian biểu, sức khoẻ, tâm trạng, chat AI, cài đặt, tâm lý nền) được chuyển sang tài khoản mới, và từ đó được lưu và mã hoá.
+  - Tài khoản demo `alex.balance@lifecare.app` / `LifeCare2026!` vẫn đăng nhập được (dữ liệu demo có lưu).
 - **Multi-user Authentication:** Registration, login, session tokens, password recovery, profile editing (name, DOB, gender, wellness goals, avatar), and password management.
 - **Privacy & Isolation:** Strict database row-level user scoping (`WHERE user_id = ?`) ensuring no user can view or modify another person's schedules, check-ins, or reflections.
 - **Data Privacy & GDPR-friendly Controls:** Export all user data as JSON (`/api/user/export`), clear health and mood history, and permanent account deletion.
