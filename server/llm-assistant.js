@@ -38,7 +38,7 @@ const INTENT_HINTS = {
   disruption: `The user just declared a disruption (already saved). Re-plan the affected pending tasks by priority, deadline and time left: find free slots before each deadline, keep urgent/high-priority work, shorten or split long tasks, push or drop low-priority ones. Do NOT just move everything to tomorrow or overload one day. Explain briefly what moved and why.`,
   goal_breakdown: `Break the goal into concrete tasks (create_goal first if it doesn't exist) with duration_minutes, priority and deadline, in a sensible order, placed with find_free_slots before the goal deadline (prefer study slots and the best focus time, respect max focus minutes). If it doesn't fit, say so and propose options.`,
   allocate_free_time: `Allocate the user's free time in the given range (default rest of this week) with find_free_slots: fill a reasonable share, not all, with work toward active goals and habits, respecting energy, focus time and breaks.`,
-  create_schedule: `The user is building a new schedule in the "Create" screen. Their answers (goal, deadline, daily time, intake form with sleep/wake and school/work hours) are in the message and <app_state>. FIRST check the goal is realistic (see Realism); if it is not, do not plan yet: explain in one or two sentences and offer a realistic target. Otherwise build a DRAFT for the requested period (default: the next 7 days). The free slots are already listed in <app_state> under "free slots", so do NOT call find_free_slots: call add_tasks ONCE with the whole draft (every task with start_time and end_time inside a free slot), and keep the call short (no description field). In this mode add_tasks/update_task/delete_task only change the draft shown to the user (ids "draft_N"), nothing is saved until the user presses "Áp dụng". Include short breaks between long sessions. Then reply in 2-4 short lines: what the draft covers, and tell the user to check it and press "Áp dụng vào thời gian biểu" when it looks right, or tell you what to change.`,
+  create_schedule: `The user is building a new schedule in the "Create" screen. Their answers (goal, deadline, daily time, intake form with sleep/wake and school/work hours) are in the message and <app_state>. Answer ONLY with a JSON object: {"reply": string, "tasks": [{"title": string, "date": "YYYY-MM-DD", "start_time": "HH:MM", "end_time": "HH:MM", "category": "Study"|"Work"|"Exercise"|"Personal"|"Rest"|"Other", "priority": "low"|"medium"|"high"}]}. FIRST check the goal is realistic (see Realism); if it is not, return "tasks": [] and explain in "reply" (one or two sentences, offer a realistic target). Otherwise "tasks" is the WHOLE draft for the next 7 days (if a draft already exists, return the full updated draft with the user's change applied). Every task must sit fully inside one of the "free slots" in <app_state>; never overlap each other. Use the user's daily time for the goal, split into sessions no longer than their max focus minutes, at their best focus time when possible, with breaks between sessions. "reply" is 1-3 short lines in the reply language: what the draft covers and that they can press "Áp dụng vào thời gian biểu" or ask for changes. Nothing is saved until they press it.`,
   behind_schedule: `The user is behind. Using overdue/pending tasks and goal forecasts, adjust only what's needed (no full rebuild): re-slot missed tasks by priority and deadline, shrink or drop low-value items, and say honestly whether the deadline is still realistic.`
 };
 
@@ -428,11 +428,13 @@ async function buildAppState(db, user, language, tz) {
   ].join('\n');
 }
 
-async function callGroq(messages, model) {
+async function callGroq(messages, model, { json = false } = {}) {
   const res = await fetch(GROQ_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 2000 }),
+    body: JSON.stringify(json
+      ? { model, messages, response_format: { type: 'json_object' }, max_completion_tokens: 2500 }
+      : { model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 2000 }),
     signal: AbortSignal.timeout(50000)
   });
   if (!res.ok) {
@@ -455,10 +457,10 @@ async function callGroq(messages, model) {
 async function callGroqResilient(messages, ctx) {
   for (;;) {
     try {
-      return await callGroq(messages, ctx.model);
+      return await callGroq(messages, ctx.model, { json: !!ctx.json });
     } catch (err) {
       // Model viết lệnh gọi công cụ hỏng (JSON sai / sai schema): thử lại một lần
-      if (err.status === 400 && /tool_use_failed|tool call validation failed|parse tool call/i.test(err.message) && !ctx.retriedTool) {
+      if (err.status === 400 && /tool_use_failed|tool call validation failed|parse tool call|json_validate_failed|valid JSON/i.test(err.message) && !ctx.retriedTool) {
         ctx.retriedTool = true;
         console.warn(`[LifeCare AI] ${ctx.model} gọi công cụ hỏng, thử lại một lần`);
         continue;
@@ -524,7 +526,8 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
     // Gửi sẵn giờ trống 7 ngày tới (trừ bản nháp) để AI lập bản nháp trong MỘT lần gọi:
     // gói miễn phí Groq chỉ ~8.000 token/phút, mỗi lần gọi đã tốn 4.000–6.000.
     const today = P.localNow(tz).date;
-    appState += `\nfree slots next 7 days (* = study block):\n${await freeSlotsText(db, user, today, P.addDays(today, 6), tz, draft)}`;
+    // Không trừ bản nháp: AI trả về cả bản nháp mới thay cho bản cũ
+    appState += `\nfree slots next 7 days (* = study block):\n${await freeSlotsText(db, user, today, P.addDays(today, 6), tz)}`;
   }
   let system = SYSTEM_PROMPT;
   if (MODE_HINTS[mode]) system += `\n\n${MODE_HINTS[mode]}`;
@@ -535,7 +538,18 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
     { role: 'user', content: `<app_state>\n${appState}\n</app_state>\n\n${userMessage.slice(0, 4000)}` }
   ];
 
-  const ctx = { model: MODEL, startedAt: Date.now(), triedFallback: false, primaryBlockedUntil: 0 };
+  const ctx = { model: MODEL, startedAt: Date.now(), triedFallback: false, primaryBlockedUntil: 0, json: !!draft };
+  // Bản nháp: không dùng lệnh gọi công cụ (gpt-oss trên Groq hay viết hỏng JSON khi danh sách việc dài),
+  // mà xin thẳng một khối JSON rồi máy chủ tự kiểm tra, bỏ buổi trùng giờ. Một lần gọi Groq.
+  if (draft) {
+    try {
+      const data = await callGroqResilient(messages, ctx);
+      return await buildDraftFromJSON(db, user, data.choices?.[0]?.message?.content, draft, language);
+    } catch (err) {
+      console.error('[LifeCare AI] Groq draft call failed:', err.message);
+      return { reply: describeError(err, language), draftTasks: draft.tasks, type: 'error', retryable: err.status === 429 || err.status === 400 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
+    }
+  }
   try {
     let reply = '';
     for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
@@ -558,7 +572,11 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
       }
     }
     if (!reply) {
-      reply = language === 'en' ? 'Done! I have updated your planner.' : 'Xong rồi! Mình đã cập nhật lịch của bạn.';
+      // Chỉ báo "xong" khi thật sự có thay đổi; không thì nói rõ là chưa làm được
+      const changed = Object.values(changes).some(Boolean);
+      reply = changed
+        ? (language === 'en' ? 'Done! I have updated your planner.' : 'Xong rồi! Mình đã cập nhật lịch của bạn.')
+        : (language === 'en' ? "I couldn't do that this time. Could you say it another way?" : 'Lần này mình chưa làm được. Bạn nói lại cụ thể hơn giúp mình nhé.');
     }
     return { reply, type: 'llm_response', tasksChanged: changes, draftTasks: draft ? draft.tasks : undefined };
   } catch (err) {
@@ -576,6 +594,37 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
     // Có thể đã đổi một phần dữ liệu trước khi lỗi: vẫn báo để giao diện tải lại.
     return { reply: describeError(err, language), draftTasks: draft ? draft.tasks : undefined, type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
   }
+}
+
+/** Đọc JSON {reply, tasks} model trả về, kiểm tra từng việc, bỏ việc trùng giờ. */
+async function buildDraftFromJSON(db, user, content, oldDraft, language) {
+  const en = language === 'en';
+  const changes = { added: 0, updated: 0, deleted: 0, goals: 0, progress: 0, disruptions: 0, draft: true };
+  let parsed = null;
+  try { parsed = JSON.parse(String(content || '').replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { parsed = null; }
+  if (!parsed || typeof parsed !== 'object') {
+    console.error('[LifeCare AI] draft JSON unreadable:', String(content || '').slice(0, 300));
+    return { reply: en ? 'I could not build the draft this time. Please press Retry.' : 'Lần này mình chưa lập được bản nháp. Bấm "Thử lại" giúp mình nhé.', type: 'error', retryable: true, draftTasks: oldDraft.tasks, tasksChanged: null };
+  }
+  const fallbackBlocks = P.intakeBlocks(P.readIntake(user));
+  const accepted = [];
+  let dropped = 0;
+  for (const raw of Array.isArray(parsed.tasks) ? parsed.tasks.slice(0, 60) : []) {
+    const [t, problem] = cleanTaskFields(raw, false);
+    if (problem || !t.start_time || !t.end_time || t.end_time <= t.start_time) { dropped++; continue; }
+    const conflict = await P.findConflict(db, user.id, { date: t.date, start_time: t.start_time, end_time: t.end_time, checkBlocks: true, extraTasks: accepted, fallbackBlocks });
+    if (conflict) { dropped++; continue; }
+    accepted.push({ ...t, id: `draft_${accepted.length + 1}` });
+  }
+  let reply = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
+  if (accepted.length) {
+    if (!reply) reply = draftReadyText(accepted.length, language);
+    if (dropped) reply += en ? `\n(${dropped} sessions were left out because they overlapped your schedule.)` : `\n(Mình bỏ ${dropped} buổi vì trùng với lịch có sẵn.)`;
+  } else if (!reply) {
+    reply = en ? 'I could not fit any session into your free time. Try less time per day or a later deadline.' : 'Mình chưa xếp được buổi nào vào giờ trống. Thử giảm thời gian mỗi ngày hoặc lùi hạn chót nhé.';
+  }
+  // Model không trả việc nào (VD mục tiêu không thực tế): giữ bản nháp cũ
+  return { reply, type: 'llm_response', draftTasks: accepted.length ? accepted : oldDraft.tasks, tasksChanged: changes };
 }
 
 function draftReadyText(n, language) {
