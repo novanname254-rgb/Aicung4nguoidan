@@ -38,7 +38,7 @@ const INTENT_HINTS = {
   disruption: `The user just declared a disruption (already saved). Re-plan the affected pending tasks by priority, deadline and time left: find free slots before each deadline, keep urgent/high-priority work, shorten or split long tasks, push or drop low-priority ones. Do NOT just move everything to tomorrow or overload one day. Explain briefly what moved and why.`,
   goal_breakdown: `Break the goal into concrete tasks (create_goal first if it doesn't exist) with duration_minutes, priority and deadline, in a sensible order, placed with find_free_slots before the goal deadline (prefer study slots and the best focus time, respect max focus minutes). If it doesn't fit, say so and propose options.`,
   allocate_free_time: `Allocate the user's free time in the given range (default rest of this week) with find_free_slots: fill a reasonable share, not all, with work toward active goals and habits, respecting energy, focus time and breaks.`,
-  create_schedule: `The user is building a new schedule in the "Create" screen. Their answers (goal, deadline, daily time, intake form with sleep/wake and school/work hours) are in the message and <app_state>. FIRST check the goal is realistic (see Realism); if it is not, do not plan yet: explain in one or two sentences and offer a realistic target. Otherwise build a DRAFT for the requested period (default: the next 7 days): call find_free_slots, then add_tasks. In this mode add_tasks/update_task/delete_task only change the draft shown to the user (ids "draft_N"), nothing is saved until the user presses "Áp dụng". Include short breaks between long sessions. Then reply in 2-4 short lines: what the draft covers, and tell the user to check it and press "Áp dụng vào thời gian biểu" when it looks right, or tell you what to change.`,
+  create_schedule: `The user is building a new schedule in the "Create" screen. Their answers (goal, deadline, daily time, intake form with sleep/wake and school/work hours) are in the message and <app_state>. FIRST check the goal is realistic (see Realism); if it is not, do not plan yet: explain in one or two sentences and offer a realistic target. Otherwise build a DRAFT for the requested period (default: the next 7 days). The free slots are already listed in <app_state> under "free slots", so do NOT call find_free_slots: call add_tasks ONCE with the whole draft (every task with start_time and end_time inside a free slot), and keep the call short (no description field). In this mode add_tasks/update_task/delete_task only change the draft shown to the user (ids "draft_N"), nothing is saved until the user presses "Áp dụng". Include short breaks between long sessions. Then reply in 2-4 short lines: what the draft covers, and tell the user to check it and press "Áp dụng vào thời gian biểu" when it looks right, or tell you what to change.`,
   behind_schedule: `The user is behind. Using overdue/pending tasks and goal forecasts, adjust only what's needed (no full rebuild): re-slot missed tasks by priority and deadline, shrink or drop low-value items, and say honestly whether the deadline is still realistic.`
 };
 
@@ -62,17 +62,20 @@ Style: Warm, direct, concise; plain text, short paragraphs or "- " lists, **bold
 
 Limits: not a doctor or therapist; general wellbeing advice only, no diagnosis or prescriptions; suggest a professional for persistent or serious problems. If the user mentions self-harm or seems in crisis, respond with care, set planning aside and urge them to contact someone they trust or emergency services (115 in Vietnam) now.`;
 
+// Groq kiểm tra lệnh gọi công cụ đúng theo schema: model hay gửi null cho trường không dùng
+// (VD goal_id: null), nên các trường tuỳ chọn phải cho phép null, nếu không cả lượt bị từ chối (HTTP 400).
+const opt = (type, extra = {}) => ({ type: [type, 'null'], ...extra });
 const TASK_PROPS = {
   title: { type: 'string' },
   date: { type: 'string' },
-  start_time: { type: 'string' },
-  end_time: { type: 'string' },
-  duration_minutes: { type: 'integer' },
-  deadline: { type: 'string' },
-  goal_id: { type: 'string' },
+  start_time: opt('string'),
+  end_time: opt('string'),
+  duration_minutes: opt('integer'),
+  deadline: opt('string'),
+  goal_id: opt('string'),
   category: { type: 'string', enum: CATEGORIES },
-  priority: { type: 'string', enum: PRIORITIES },
-  description: { type: 'string' }
+  priority: opt('string', { enum: [...PRIORITIES, null] }),
+  description: opt('string')
 };
 
 const fn = (name, description, properties, required = []) => ({
@@ -89,21 +92,21 @@ const TOOLS = [
   fn('add_tasks', "Add one or more tasks to the user's planner.",
     { tasks: { type: 'array', items: { type: 'object', properties: TASK_PROPS, required: ['title', 'date', 'category'] } } }, ['tasks']),
   fn('update_task', 'Change only the given fields of a task (status "completed" ticks it off).',
-    { id: { type: 'string' }, ...TASK_PROPS, status: { type: 'string', enum: STATUSES } }, ['id']),
+    { id: { type: 'string' }, ...TASK_PROPS, title: opt('string'), date: opt('string'), category: opt('string', { enum: [...CATEGORIES, null] }), status: opt('string', { enum: [...STATUSES, null] }) }, ['id']),
   fn('delete_task', 'Delete a task from the planner.', { id: { type: 'string' } }, ['id']),
   fn('create_goal', 'Create a big goal; returns its id.', {
-    title: { type: 'string' }, description: { type: 'string' }, deadline: { type: 'string' },
-    estimated_minutes: { type: 'integer' }, priority: { type: 'string', enum: PRIORITIES }
+    title: { type: 'string' }, description: opt('string'), deadline: opt('string'),
+    estimated_minutes: opt('integer'), priority: opt('string', { enum: [...PRIORITIES, null] })
   }, ['title']),
   fn('update_goal', 'Change a goal.', {
-    id: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, deadline: { type: 'string' },
-    estimated_minutes: { type: 'integer' }, priority: { type: 'string', enum: PRIORITIES }, status: { type: 'string', enum: ['active', 'paused', 'done'] }
+    id: { type: 'string' }, title: opt('string'), description: opt('string'), deadline: opt('string'),
+    estimated_minutes: opt('integer'), priority: opt('string', { enum: [...PRIORITIES, null] }), status: opt('string', { enum: ['active', 'paused', 'done', null] })
   }, ['id']),
   fn('log_progress', 'Record extra work the user did toward a goal (date defaults to today).', {
-    goal_id: { type: 'string' }, minutes: { type: 'integer' }, date: { type: 'string' }, note: { type: 'string' }
+    goal_id: opt('string'), minutes: { type: 'integer' }, date: opt('string'), note: opt('string')
   }, ['minutes']),
   fn('add_disruption', 'Record a disruption; omit times for the whole day.', {
-    kind: { type: 'string', enum: P.DISRUPTION_KINDS }, date: { type: 'string' }, start_time: { type: 'string' }, end_time: { type: 'string' }, note: { type: 'string' }
+    kind: { type: 'string', enum: P.DISRUPTION_KINDS }, date: { type: 'string' }, start_time: opt('string'), end_time: opt('string'), note: opt('string')
   }, ['kind', 'date'])
 ];
 
@@ -121,6 +124,9 @@ function positiveInt(v, max) {
 /** Trả về [fields, null] hoặc [null, lỗi để model sửa]. partial = true cho update. */
 function cleanTaskFields(raw, partial) {
   if (!raw || typeof raw !== 'object') return [null, 'Task must be an object.'];
+  // null = không gửi trường đó (model hay điền null cho mọi trường không dùng, kể cả khi sửa một việc;
+  // muốn bỏ liên kết mục tiêu thì gửi goal_id: "")
+  raw = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== null));
   const out = {};
   if (raw.title !== undefined || !partial) {
     if (typeof raw.title !== 'string' || !raw.title.trim()) return [null, 'title is required.'];
@@ -196,18 +202,8 @@ async function runTool(db, user, name, argsText, changes, tz, draft = null) {
   if (name === 'find_free_slots') {
     if (!P.isRealDate(args.start_date) || !P.isRealDate(args.end_date)) return 'Error: start_date and end_date must be YYYY-MM-DD.';
     if (P.daysBetween(args.start_date, args.end_date) > 62) return 'Error: range must be at most 62 days.';
-    const slots = await P.findFreeSlots(db, userId, args.start_date, args.end_date, {
-      minMinutes: positiveInt(args.min_minutes, 600) || 30, tz,
-      extraTasks: draft ? draft.tasks : [],
-      fallbackBlocks: P.intakeBlocks(P.readIntake(user))
-    });
-    // Gọn để tiết kiệm token (gói miễn phí Groq ~8.000 token/phút): mỗi ngày một dòng "ngày: start-end, start-end*"
-    // (* = trong khung Tự học). Tối đa 40 khoảng.
-    const shown = slots.slice(0, 40);
-    const byDay = {};
-    shown.forEach(f => (byDay[f.date] = byDay[f.date] || []).push(`${f.start}-${f.end}${f.kind === 'study_block' ? '*' : ''}`));
-    const lines = Object.entries(byDay).map(([d, list]) => `${d}: ${list.join(', ')}`);
-    return lines.length ? lines.join('\n') + (slots.length > 40 ? `\n(+${slots.length - 40} more; narrow the range)` : '') + '\n(* = study block)' : 'No free slots.';
+    const text = await freeSlotsText(db, user, args.start_date, args.end_date, tz, draft, positiveInt(args.min_minutes, 600) || 30);
+    return text === 'No free slots.' ? text : text + '\n(* = study block)';
   }
 
   if (name === 'add_tasks') {
@@ -461,6 +457,12 @@ async function callGroqResilient(messages, ctx) {
     try {
       return await callGroq(messages, ctx.model);
     } catch (err) {
+      // Model viết lệnh gọi công cụ hỏng (JSON sai / sai schema): thử lại một lần
+      if (err.status === 400 && /tool_use_failed|tool call validation failed|parse tool call/i.test(err.message) && !ctx.retriedTool) {
+        ctx.retriedTool = true;
+        console.warn(`[LifeCare AI] ${ctx.model} gọi công cụ hỏng, thử lại một lần`);
+        continue;
+      }
       if (err.status !== 429) throw err;
       if (ctx.model !== FALLBACK_MODEL && FALLBACK_MODEL && !ctx.triedFallback) {
         console.warn(`[LifeCare AI] ${ctx.model} hết hạn mức, chuyển sang ${FALLBACK_MODEL}`);
@@ -517,7 +519,13 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
   while (past.length && past[0].role !== 'user') past.shift();
 
   let appState = await buildAppState(db, user, language, tz);
-  if (draft) appState += `\ndraft (id|date|time|title|category|priority|duration), not saved yet:\n${draft.tasks.map(draftLine).join('\n') || 'empty'}`;
+  if (draft) {
+    appState += `\ndraft (id|date|time|title|category|priority|duration), not saved yet:\n${draft.tasks.map(draftLine).join('\n') || 'empty'}`;
+    // Gửi sẵn giờ trống 7 ngày tới (trừ bản nháp) để AI lập bản nháp trong MỘT lần gọi:
+    // gói miễn phí Groq chỉ ~8.000 token/phút, mỗi lần gọi đã tốn 4.000–6.000.
+    const today = P.localNow(tz).date;
+    appState += `\nfree slots next 7 days (* = study block):\n${await freeSlotsText(db, user, today, P.addDays(today, 6), tz, draft)}`;
+  }
   let system = SYSTEM_PROMPT;
   if (MODE_HINTS[mode]) system += `\n\n${MODE_HINTS[mode]}`;
   if (INTENT_HINTS[intent]) system += `\n\nPurpose of this request: ${INTENT_HINTS[intent]}`;
@@ -537,9 +545,16 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
       const calls = msg.tool_calls || [];
       messages.push({ role: 'assistant', content: msg.content || '', ...(calls.length ? { tool_calls: calls } : {}) });
       if (calls.length === 0) break;
+      let toolError = false;
       for (const call of calls) {
         const result = await runTool(db, user, call.function?.name, call.function?.arguments, changes, tz, draft);
+        if (/^Error/.test(result)) toolError = true;
         messages.push({ role: 'tool', tool_call_id: call.id, content: result });
+      }
+      // Bản nháp đã lập xong, không lỗi: dừng luôn, khỏi tốn thêm một lần gọi chỉ để lấy câu trả lời
+      if (draft && changes.draft && !toolError && draft.tasks.length) {
+        reply = draftReadyText(draft.tasks.length, language);
+        break;
       }
     }
     if (!reply) {
@@ -551,11 +566,8 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
     // Bản nháp đã lập xong, chỉ lượt trả lời cuối bị giới hạn (thường là hết token/phút):
     // vẫn đưa bản nháp cho người dùng xem và áp dụng, không báo lỗi.
     if (draft && changes.draft && draft.tasks.length) {
-      const n = draft.tasks.length;
       return {
-        reply: language === 'en'
-          ? `Your draft is ready: ${n} sessions, none overlapping your schedule. Check it on the right and press "Apply to timetable" when it looks right, or tell me what to change.`
-          : `Bản nháp đã xong: ${n} buổi, không trùng lịch có sẵn. Xem bên phải, thấy ổn thì bấm "Áp dụng vào thời gian biểu", hoặc nhắn mình cần đổi gì.`,
+        reply: draftReadyText(draft.tasks.length, language),
         type: 'llm_response',
         draftTasks: draft.tasks,
         tasksChanged: changes
@@ -564,6 +576,25 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
     // Có thể đã đổi một phần dữ liệu trước khi lỗi: vẫn báo để giao diện tải lại.
     return { reply: describeError(err, language), draftTasks: draft ? draft.tasks : undefined, type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
   }
+}
+
+function draftReadyText(n, language) {
+  return language === 'en'
+    ? `Your draft is ready: ${n} sessions, none overlapping your schedule. Check it on the right and press "Apply to timetable" when it looks right, or tell me what to change.`
+    : `Bản nháp đã xong: ${n} buổi, không trùng lịch có sẵn. Xem bên phải, thấy ổn thì bấm "Áp dụng vào thời gian biểu", hoặc nhắn mình cần đổi gì.`;
+}
+
+/** Giờ trống dạng gọn, mỗi ngày một dòng "ngày: start-end, start-end*" (* = trong khung Tự học), tối đa 40 khoảng. */
+async function freeSlotsText(db, user, start, end, tz, draft = null, minMinutes = 30) {
+  const slots = await P.findFreeSlots(db, user.id, start, end, {
+    minMinutes, tz,
+    extraTasks: draft ? draft.tasks : [],
+    fallbackBlocks: P.intakeBlocks(P.readIntake(user))
+  });
+  const byDay = {};
+  slots.slice(0, 40).forEach(f => (byDay[f.date] = byDay[f.date] || []).push(`${f.start}-${f.end}${f.kind === 'study_block' ? '*' : ''}`));
+  const lines = Object.entries(byDay).map(([d, list]) => `${d}: ${list.join(', ')}`);
+  return lines.length ? lines.join('\n') + (slots.length > 40 ? `\n(+${slots.length - 40} more; narrow the range)` : '') : 'No free slots.';
 }
 
 /** Bản nháp người dùng gửi lại (đang xem trên màn hình): chỉ giữ việc hợp lệ, đánh lại id draft_N. */
