@@ -102,6 +102,7 @@ Tiêu đề và mô tả công việc để nguyên. Mật khẩu vốn đã đ�
 Nhiều instance Vercel dùng chung Sheet:
 - Mỗi phản hồi API kèm header `X-Data-Version`, trình duyệt gửi lại ở yêu cầu sau. Instance nào đang giữ bản cũ hơn sẽ nạp lại từ Sheet trước khi trả lời.
 - Google Sheets chỉ cho khoảng 60 lượt đọc/phút. Server gộp các lần kiểm tra. Nếu Sheet tạm báo bận, server vẫn phục vụ bằng dữ liệu đang có và tự thử ghi lại.
+- Ghi lần lượt, không đè nhau: trước khi ghi, instance giữ một khoá ngắn hạn ở ô `_meta!A2:B2` (tự hết hạn sau 20 giây). Nếu instance khác vừa ghi phiên bản mới, nó đọc bản đó về và gộp theo từng dòng (dòng mình thêm/sửa/xoá thắng, các dòng khác giữ của bản mới) rồi mới ghi. Dữ liệu khách được gộp tương tự. Mỗi lần ghi được đệm ô trống phủ hết vùng cũ, nên không cần lệnh xoá và instance khác đọc giữa chừng không thấy bảng trống.
 
 Không sửa tay dữ liệu trong Sheet: các ô `enc:v1:...` là bản mã. Nếu sửa tay, nhớ tăng phiên bản ở ô `_meta!A1` để server nạp lại.
 

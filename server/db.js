@@ -224,14 +224,97 @@ const state = {
   version: null,
   lastVersionCheck: 0,
   persistChain: Promise.resolve(),
-  lastSavedHash: null, // bỏ qua lần ghi nếu dữ liệu cần lưu không đổi
+  // Dữ liệu chính đang nằm trên Sheet ở phiên bản `version` (chưa mã hoá). So với bộ nhớ để biết
+  // instance này đã đổi những dòng nào, và gộp đúng khi instance khác vừa ghi phiên bản mới.
+  basePlain: emptyPlain(),
+  sheetExtent: {},   // bảng -> { rows, cols } dữ liệu đang có trên Sheet (để ghi đè phủ hết phần cũ)
   syncPromise: null,
   guestVersions: {}, // guest_id -> phiên bản dữ liệu khách đã lưu tạm trên Sheet
-  guestHashes: {},   // guest_id -> mã băm lần lưu gần nhất (bỏ qua nếu không đổi)
+  guestBase: {},     // guest_id -> dữ liệu khách ở phiên bản đó (để gộp như dữ liệu chính)
+  instanceId: crypto.randomUUID(), // tên giữ khoá ghi trên Sheet
   columns: {} // bảng -> danh sách cột hiện tại
 };
 
 const GUEST_TTL_MS = 24 * 60 * 60 * 1000;
+
+// ---------------------------------------------------------------- gộp thay đổi theo từng dòng
+// Mỗi bảng có khoá chính một cột. Gộp ba bên: base (bản trên Sheet mà instance này đã thấy),
+// ours (bộ nhớ instance này), theirs (bản mới hơn do instance khác vừa ghi).
+// Dòng mình thêm / sửa / xoá thắng; mọi dòng khác lấy theo theirs.
+function emptyPlain() { return Object.fromEntries(TABLES.map(t => [t, []])); }
+const pkOf = t => (t === 'sessions' || t === 'password_resets' ? 'token' : 'id');
+// So sánh không phụ thuộc kiểu (Sheet trả số, SQLite trả chuỗi...): mọi giá trị đổi ra chuỗi, rỗng = null.
+const canon = (t, r) => JSON.stringify(state.columns[t].map(c => (r[c] === null || r[c] === undefined || r[c] === '' ? null : String(r[c]))));
+const indexRows = (t, rows) => new Map((rows || []).map(r => [String(r[pkOf(t)]), r]));
+
+/** Khoá các dòng instance này đã thêm / sửa / xoá so với base. */
+function touchedKeys(t, base, ours) {
+  const b = indexRows(t, base[t]), o = indexRows(t, ours[t]);
+  const touched = new Set();
+  for (const [k, row] of o) if (!b.has(k) || canon(t, b.get(k)) !== canon(t, row)) touched.add(k);
+  for (const k of b.keys()) if (!o.has(k)) touched.add(k);
+  return touched;
+}
+const hasChanges = (base, ours) => TABLES.some(t => touchedKeys(t, base, ours).size > 0);
+
+function mergePlain(base, ours, theirs) {
+  const out = {};
+  for (const t of TABLES) {
+    const touched = touchedKeys(t, base, ours);
+    const o = indexRows(t, ours[t]);
+    const merged = indexRows(t, theirs[t]);
+    for (const k of touched) {
+      if (o.has(k)) merged.set(k, o.get(k)); else merged.delete(k);
+    }
+    out[t] = [...merged.values()];
+  }
+  return out;
+}
+
+/**
+ * Đưa thay đổi của instance khác (theirs so với base) vào bộ nhớ, trừ các dòng instance này đã đổi.
+ * Chỉ sửa đúng các dòng đó, không thay cả bảng, để không mất thay đổi của request khác đang chạy.
+ * where: điều kiện giới hạn (dữ liệu chính hoặc đúng một khách).
+ */
+async function applyTheirChanges(base, ours, theirs) {
+  await client.execute('PRAGMA foreign_keys = OFF');
+  try {
+    for (const t of TABLES) {
+      const touched = touchedKeys(t, base, ours);
+      const b = indexRows(t, base[t]);
+      const th = indexRows(t, theirs[t]);
+      const cols = state.columns[t];
+      const upsert = `INSERT OR REPLACE INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`;
+      const stmts = [];
+      for (const [k, row] of th) {
+        if (touched.has(k)) continue;
+        if (!b.has(k) || canon(t, b.get(k)) !== canon(t, row)) stmts.push({ sql: upsert, args: cols.map(c => row[c] ?? null) });
+      }
+      for (const k of b.keys()) {
+        if (!th.has(k) && !touched.has(k)) stmts.push({ sql: `DELETE FROM ${t} WHERE ${pkOf(t)} = ?`, args: [k] });
+      }
+      if (stmts.length) await client.batch(stmts, 'write');
+    }
+  } finally {
+    await client.execute('PRAGMA foreign_keys = ON');
+  }
+}
+
+/** Bản chụp đã nạp từ Sheet -> dữ liệu chưa mã hoá, đúng các cột hiện tại. */
+function plainFromSnapshot(snapshot) {
+  const out = emptyPlain();
+  for (const t of TABLES) {
+    const saved = snapshot?.tables?.[t];
+    if (!saved || !saved.rows?.length) continue;
+    const { columns, rows } = upgradeLegacyRows(t, saved.columns, saved.rows);
+    out[t] = decryptRows(t, rows.map(r => Object.fromEntries(columns.map((c, i) => [c, r[i] ?? null]))))
+      .map(o => Object.fromEntries(state.columns[t].map(c => [c, o[c] ?? null])));
+  }
+  return out;
+}
+
+/** Dữ liệu khách (object theo bảng) -> đủ mọi bảng. */
+const guestPlain = data => Object.fromEntries(TABLES.map(t => [t, (data && data[t]) || []]));
 const newVersion = () => `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 const versionTs = v => Number(String(v || '').split('-')[0]) || 0;
 
@@ -331,7 +414,8 @@ async function loadSnapshot(snapshot) {
   }
   await client.execute('PRAGMA foreign_keys = ON');
   state.version = snapshot?.version ?? null;
-  state.lastSavedHash = (await dumpPlain()).hash;
+  state.basePlain = (await dumpPlain()).plain;
+  state.sheetExtent = snapshot?.extent || {};
   state.dirty = false;
 }
 
@@ -375,7 +459,7 @@ async function dumpGuest(gid) {
 async function removeGuestLocally(gid) {
   await client.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [gid] }); // xoá dây chuyền mọi bảng con
   delete state.guestVersions[gid];
-  delete state.guestHashes[gid];
+  delete state.guestBase[gid];
 }
 
 async function loadGuest(g) {
@@ -393,7 +477,7 @@ async function loadGuest(g) {
   }
   await client.execute('PRAGMA foreign_keys = ON');
   state.guestVersions[g.id] = g.version;
-  state.guestHashes[g.id] = crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
+  state.guestBase[g.id] = guestPlain(data);
 }
 
 /** Đồng bộ dữ liệu khách theo trạng thái trên Sheet: nạp khách đổi phiên bản, xoá khách đã bị xoá ở nơi khác. */
@@ -411,45 +495,84 @@ async function applyRemoteGuests(remoteGuests) {
   }
 }
 
-/** Lưu tạm các khách có thay đổi; gỡ khách đã đăng xuất / hết hạn. */
-async function persistGuests() {
+/**
+ * Lưu tạm các khách có thay đổi; gỡ khách đã đăng xuất / hết hạn. Gọi khi đang giữ khoá ghi.
+ * remote: trạng thái Sheet vừa đọc khi giữ khoá. Nếu cùng một khách vừa được instance khác lưu
+ * (VD hai tab, hai yêu cầu song song), gộp theo từng dòng thay vì ghi đè cả khối.
+ */
+async function persistGuests(remote) {
   if (store.kind !== 'google-sheet') return;
   const ids = await localGuestIds();
+  const remoteById = new Map((remote.guests || []).map(g => [g.id, g]));
   const upserts = [];
-  const newHashes = {};
+  const bases = {};
   for (const gid of ids) {
-    const data = await dumpGuest(gid);
-    const hash = crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
-    if (hash === state.guestHashes[gid]) continue;
-    const created = Date.parse(data.users?.[0]?.created_at || '') || Date.now();
-    upserts.push({ id: gid, version: newVersion(), expires_at: created + GUEST_TTL_MS, blob: encryptValue(data) });
-    newHashes[gid] = hash;
+    const ours = guestPlain(await dumpGuest(gid));
+    const base = state.guestBase[gid];
+    if (base && !hasChanges(base, ours)) continue;
+    const r = remoteById.get(gid);
+    let target = ours;
+    if (state.guestVersions[gid] && !r) {
+      // Đã lưu trước đây nhưng không còn trên Sheet: khách đã đăng xuất / hết hạn ở nơi khác
+      await removeGuestLocally(gid);
+      continue;
+    }
+    if (r && r.version !== state.guestVersions[gid]) {
+      const theirs = guestPlain(decryptValue(r.blob));
+      const from = base || guestPlain(null);
+      await applyTheirChanges(from, ours, theirs);
+      target = mergePlain(from, ours, theirs);
+    }
+    const created = Date.parse(target.users?.[0]?.created_at || '') || Date.now();
+    upserts.push({ id: gid, version: newVersion(), expires_at: created + GUEST_TTL_MS, blob: encryptValue(target) });
+    bases[gid] = target;
   }
-  const removed = Object.keys(state.guestHashes).filter(gid => !ids.includes(gid));
+  const removed = Object.keys(state.guestVersions).filter(gid => !ids.includes(gid));
   if (!upserts.length && !removed.length) return;
-  await store.saveGuests({ upserts, removed });
-  for (const g of upserts) { state.guestVersions[g.id] = g.version; state.guestHashes[g.id] = newHashes[g.id]; }
-  for (const gid of removed) { delete state.guestVersions[gid]; delete state.guestHashes[gid]; }
+  await store.saveGuests({ upserts, removed, current: remote.guests, extent: remote.guestExtent });
+  for (const g of upserts) { state.guestVersions[g.id] = g.version; state.guestBase[g.id] = bases[g.id]; }
+  for (const gid of removed) { delete state.guestVersions[gid]; delete state.guestBase[gid]; }
+}
+
+/** Ghi dữ liệu chính khi đang giữ khoá; instance khác vừa ghi thì gộp theo từng dòng rồi mới ghi. */
+async function persistMain(remote) {
+  const ours = (await dumpPlain()).plain;
+  if (!hasChanges(state.basePlain, ours)) return;
+  let target = ours;
+  if (store.kind === 'google-sheet' && remote.version && remote.version !== state.version) {
+    console.log('[LifeCare DB] Instance khác vừa ghi, gộp thay đổi trước khi lưu...');
+    const snapshot = await store.load(TABLES);
+    const theirs = plainFromSnapshot(snapshot);
+    await applyTheirChanges(state.basePlain, ours, theirs);
+    target = mergePlain(state.basePlain, ours, theirs);
+    state.sheetExtent = snapshot?.extent || {};
+  }
+  const snapshot = encryptSnapshot(target);
+  await store.save(snapshot, state.sheetExtent);
+  state.version = snapshot.version;
+  state.basePlain = target;
+  state.sheetExtent = Object.fromEntries(TABLES.map(t => [t, {
+    rows: Math.max(target[t].length + 1, state.sheetExtent[t]?.rows || 0),
+    cols: Math.max(state.columns[t].length, state.sheetExtent[t]?.cols || 0)
+  }]));
+  state.lastVersionCheck = Date.now();
 }
 
 async function persist() {
-  // Ghi tuần tự: hai request song song không ghi đè lẫn nhau.
+  // Ghi tuần tự trong instance; giữa các instance thì dùng khoá ghi trên Sheet.
   const run = state.persistChain.then(async () => {
     if (!state.dirty) return;
     state.dirty = false;
+    let remote = null;
     try {
-      const { plain, hash } = await dumpPlain();
-      if (hash !== state.lastSavedHash) { // chỉ dữ liệu khách thay đổi thì không ghi lại dữ liệu chính
-        const snapshot = encryptSnapshot(plain);
-        await store.save(snapshot);
-        state.version = snapshot.version;
-        state.lastSavedHash = hash;
-        state.lastVersionCheck = Date.now();
-      }
-      await persistGuests();
+      remote = await store.acquireLock(state.instanceId);
+      await persistMain(remote);
+      await persistGuests(remote);
     } catch (err) {
       state.dirty = true; // lần sau thử lại
       throw err;
+    } finally {
+      if (remote && remote.locked) await store.releaseLock(state.instanceId).catch(e => console.warn('[LifeCare DB] Không nhả được khoá ghi:', e.message));
     }
   });
   state.persistChain = run.catch(() => {});
@@ -488,7 +611,6 @@ async function initDatabase() {
       await readColumns();
       const snapshot = await store.load(TABLES);
       if (snapshot) await loadSnapshot(snapshot);
-      else state.lastSavedHash = null;
       await applyRemoteGuests((await store.getState()).guests);
       state.lastVersionCheck = Date.now();
       console.log(`[LifeCare DB] Lưu trữ: ${store.describe()} (${snapshot ? 'đã nạp dữ liệu' : 'chưa có dữ liệu'})`);

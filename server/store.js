@@ -37,6 +37,10 @@ class JsonFileStore {
 
   async saveGuests() {}
 
+  async acquireLock() { return { version: null, guests: [], locked: false }; }
+
+  async releaseLock() {}
+
   async save(snapshot) {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tmp = this.filePath + '.tmp';
@@ -52,6 +56,21 @@ const META_TAB = '_meta';
 // Dòng bị xoá khi khách đăng xuất hoặc hết hạn (24 giờ). Khối mã hoá được chia nhỏ vì mỗi ô tối đa 50.000 ký tự.
 const GUEST_TAB = '_guests';
 const CELL_CHUNK = 45000;
+const LOCK_TTL_MS = 20000;   // khoá ghi tự hết hạn sau 20 giây
+const LOCK_WAIT_MS = 12000;  // chờ khoá tối đa 12 giây
+const LOCK_SETTLE_MS = 400;  // đợi sau khi ghi tên vào ô khoá rồi mới đọc lại
+/**
+ * Đệm bảng giá trị bằng ô trống cho phủ hết vùng dữ liệu cũ (rows × cols), để MỘT lần ghi đè vừa ghi
+ * dữ liệu mới vừa xoá phần cũ còn thừa. Không cần lệnh xoá riêng, nên instance khác đọc giữa chừng
+ * không bao giờ thấy tab trống hay dữ liệu nửa cũ nửa mới.
+ */
+function padValues(values, prev = { rows: 0, cols: 0 }) {
+  const width = Math.max(prev.cols || 0, ...values.map(r => r.length), 1);
+  const out = values.map(r => [...r, ...Array(width - r.length).fill('')]);
+  while (out.length < (prev.rows || 0)) out.push(Array(width).fill(''));
+  return out;
+}
+const extentOf = values => ({ rows: (values || []).length, cols: Math.max(0, ...(values || []).map(r => r.length)) });
 
 function parseServiceAccount(raw) {
   let text = (raw || '').trim();
@@ -176,20 +195,64 @@ class GoogleSheetStore {
     }));
   }
 
-  /** Một lần đọc: phiên bản dữ liệu chính + toàn bộ dữ liệu khách đang dùng. */
+  /** Một lần đọc: phiên bản dữ liệu chính, khoá ghi (hàng 2 của _meta) + toàn bộ dữ liệu khách đang dùng. */
   async getState() {
     await this.ensureTabs([META_TAB, GUEST_TAB]);
-    const data = await this.api('GET', `/values:batchGet?ranges=${encodeURIComponent(META_TAB + '!A1:B1')}&ranges=${encodeURIComponent(GUEST_TAB)}&valueRenderOption=UNFORMATTED_VALUE`);
+    const data = await this.api('GET', `/values:batchGet?ranges=${encodeURIComponent(META_TAB + '!A1:B2')}&ranges=${encodeURIComponent(GUEST_TAB)}&valueRenderOption=UNFORMATTED_VALUE`);
     const ranges = data.valueRanges || [];
-    return { version: ranges[0]?.values?.[0]?.[0] ?? null, guests: GoogleSheetStore.parseGuests(ranges[1]?.values) };
+    const meta = ranges[0]?.values || [];
+    return {
+      version: meta[0]?.[0] ?? null,
+      lock: { owner: meta[1]?.[0] ? String(meta[1][0]) : '', expiresAt: Number(meta[1]?.[1]) || 0 },
+      guests: GoogleSheetStore.parseGuests(ranges[1]?.values),
+      guestExtent: extentOf(ranges[1]?.values)
+    };
+  }
+
+  /**
+   * Khoá ghi ngắn hạn (lease) ở ô _meta!A2:B2 để các instance Vercel ghi lần lượt, không đè nhau.
+   * Sheets không có thao tác so-sánh-rồi-ghi, nên: ghi tên mình vào ô khoá, đợi một chút, đọc lại; còn là
+   * mình thì giữ khoá. Khoá tự hết hạn sau LOCK_TTL_MS phòng khi instance giữ khoá bị dừng giữa chừng.
+   * Trả về trạng thái Sheet đọc ngay sau khi giữ khoá (phiên bản + dữ liệu khách mới nhất).
+   * Quá LOCK_WAIT_MS vẫn chưa có khoá thì trả về trạng thái hiện tại với locked = false (vẫn gộp an toàn nhất có thể).
+   */
+  async acquireLock(owner) {
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
+      const st = await this.getState();
+      const free = !st.lock.owner || st.lock.expiresAt < Date.now() || st.lock.owner === owner;
+      if (free) {
+        await this.api('POST', '/values:batchUpdate', { valueInputOption: 'RAW', data: [{ range: `${META_TAB}!A2`, values: [[owner, Date.now() + LOCK_TTL_MS]] }] });
+        await new Promise(r => setTimeout(r, LOCK_SETTLE_MS));
+        const check = await this.getState();
+        if (check.lock.owner === owner) return { ...check, locked: true };
+      }
+      if (Date.now() > deadline) {
+        console.warn('[LifeCare Store] Không lấy được khoá ghi, ghi không khoá.');
+        return { ...(await this.getState()), locked: false };
+      }
+      await new Promise(r => setTimeout(r, 250 + Math.random() * 500));
+    }
+  }
+
+  async releaseLock() {
+    await this.api('POST', '/values:batchUpdate', { valueInputOption: 'RAW', data: [{ range: `${META_TAB}!A2`, values: [['', 0]] }] });
   }
 
   /** Cập nhật dữ liệu khách: upserts [{id, version, expires_at, blob}], removed [id]. Tự bỏ các khách đã hết hạn. */
-  async saveGuests({ upserts = [], removed = [] }) {
+  /**
+   * Cập nhật dữ liệu khách: upserts [{id, version, expires_at, blob}], removed [id]. Tự bỏ các khách đã hết hạn.
+   * current / extent: danh sách khách và kích thước tab vừa đọc khi giữ khoá (khỏi đọc lại).
+   */
+  async saveGuests({ upserts = [], removed = [], current = null, extent = null }) {
     await this.ensureTabs([GUEST_TAB]);
-    const data = await this.api('GET', `/values/${encodeURIComponent(GUEST_TAB)}?valueRenderOption=UNFORMATTED_VALUE`);
+    if (!current) {
+      const values = (await this.api('GET', `/values/${encodeURIComponent(GUEST_TAB)}?valueRenderOption=UNFORMATTED_VALUE`)).values;
+      current = GoogleSheetStore.parseGuests(values);
+      extent = extentOf(values);
+    }
     const now = Date.now();
-    const byId = new Map(GoogleSheetStore.parseGuests(data.values).map(g => [g.id, g]));
+    const byId = new Map(current.map(g => [g.id, g]));
     removed.forEach(id => byId.delete(id));
     upserts.forEach(g => byId.set(g.id, g));
     const rows = [...byId.values()].filter(g => g.expires_at > now).map(g => {
@@ -197,12 +260,10 @@ class GoogleSheetStore {
       for (let i = 0; i < g.blob.length; i += CELL_CHUNK) chunks.push(g.blob.slice(i, i + CELL_CHUNK));
       return [g.id, g.version, g.expires_at, ...chunks];
     });
-    const width = Math.max(4, ...rows.map(r => r.length));
-    await this.ensureGrid({ [GUEST_TAB]: { rows: rows.length + 1, cols: width } });
-    await this.api('POST', '/values:batchClear', { ranges: [GUEST_TAB] });
-    if (rows.length) {
-      await this.api('POST', '/values:batchUpdate', { valueInputOption: 'RAW', data: [{ range: `${GUEST_TAB}!A1`, values: rows }] });
-    }
+    const values = padValues(rows, extent || { rows: 0, cols: 0 });
+    if (!values.length) return;
+    await this.ensureGrid({ [GUEST_TAB]: { rows: values.length + 1, cols: values[0].length } });
+    await this.api('POST', '/values:batchUpdate', { valueInputOption: 'RAW', data: [{ range: `${GUEST_TAB}!A1`, values }] });
   }
 
   async load(tableNames) {
@@ -221,17 +282,23 @@ class GoogleSheetStore {
       const rows = values.slice(1).map(r => columns.map((_, c) => (r[c] === '' || r[c] === undefined ? null : r[c])));
       tables[name] = { columns, rows };
     });
-    return { version, savedAt: ranges[0]?.values?.[0]?.[1] ?? null, tables };
+    const extent = Object.fromEntries(tableNames.map((name, i) => [name, extentOf(ranges[i + 1]?.values)]));
+    return { version, savedAt: ranges[0]?.values?.[0]?.[1] ?? null, tables, extent };
   }
 
-  async save(snapshot) {
+  /** prevExtent: { bảng: { rows, cols } } kích thước dữ liệu đang có trên Sheet (kể cả hàng tiêu đề). */
+  async save(snapshot, prevExtent = {}) {
     const names = Object.keys(snapshot.tables);
     await this.ensureTabs([META_TAB, ...names]);
-    await this.ensureGrid(Object.fromEntries(names.map(n => [n, { rows: snapshot.tables[n].rows.length + 1, cols: snapshot.tables[n].columns.length }])));
-    await this.api('POST', '/values:batchClear', { ranges: names });
+    await this.ensureGrid(Object.fromEntries(names.map(n => [n, {
+      rows: Math.max(snapshot.tables[n].rows.length + 1, prevExtent[n]?.rows || 0),
+      cols: Math.max(snapshot.tables[n].columns.length, prevExtent[n]?.cols || 0)
+    }])));
+    // Một lần ghi đè (dữ liệu + phiên bản), đệm ô trống phủ hết vùng dữ liệu cũ (prevExtent) thay cho lệnh xoá.
     const data = names.map(name => {
       const { columns, rows } = snapshot.tables[name];
-      return { range: `${name}!A1`, values: [columns, ...rows.map(r => r.map(v => (v === null || v === undefined ? '' : v)))] };
+      const values = [columns, ...rows.map(r => r.map(v => (v === null || v === undefined ? '' : v)))];
+      return { range: `${name}!A1`, values: padValues(values, prevExtent[name]) };
     });
     data.push({ range: `${META_TAB}!A1`, values: [[snapshot.version, snapshot.savedAt, 'Dữ liệu nhạy cảm đã được mã hoá. Không sửa tay các tab này.']] });
     await this.api('POST', '/values:batchUpdate', { valueInputOption: 'RAW', data });
