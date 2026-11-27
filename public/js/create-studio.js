@@ -31,15 +31,20 @@ const CreateStudio = (() => {
   const esc = s => escapeHTML(s == null ? '' : String(s));
   const minutesText = m => (m >= 60 ? (m % 60 ? `${Math.floor(m / 60)} giờ ${m % 60} phút` : `${m / 60} giờ`) : `${m} phút`);
 
-  // Các câu hỏi cố định. saved = lưu vào tài khoản, lần sau bỏ qua.
+  // Các câu hỏi cố định, theo thứ tự hỏi. saved = giữ cho lần sau (lần mở sau bỏ qua câu này);
+  // các câu khác lần nào tạo lịch cũng hỏi lại từ đầu.
   const STEPS = [
-    { key: 'goal', label: ['Mục tiêu', 'Goal'], ask: ['Bạn muốn lên lịch cho mục tiêu gì?', 'What do you want to plan for?'] },
-    { key: 'deadline', label: ['Thời hạn', 'Deadline'], ask: ['Khi nào bạn muốn đạt được mục tiêu này?', 'When do you want to reach it?'] },
     { key: 'role', label: ['Bạn là', 'You are'], ask: ['Bạn đang là…', 'You are…'], saved: true },
     { key: 'routine', label: ['Giờ giấc hằng ngày', 'Daily hours'], ask: ['Điền giờ ngủ và giờ học/làm của bạn. Mình sẽ không xếp việc vào những giờ này.', 'Fill in your sleep and school/work hours. Nothing will be scheduled there.'], saved: true },
-    { key: 'focus', label: ['Giờ tập trung', 'Focus time'], ask: ['Bạn tập trung tốt nhất lúc nào, và mỗi lần được bao lâu?', 'When do you focus best, and for how long?'], saved: true },
-    { key: 'daily', label: ['Thời gian mỗi ngày', 'Time per day'], ask: ['Mỗi ngày bạn dành được bao nhiêu thời gian cho mục tiêu này?', 'How much time a day can you give this goal?'], saved: true }
+    { key: 'goal', label: ['Mục tiêu', 'Goal'], ask: ['Bạn muốn lên lịch cho mục tiêu gì?', 'What do you want to plan for?'] },
+    { key: 'deadline', label: ['Thời hạn', 'Deadline'], ask: ['Khi nào bạn muốn đạt được mục tiêu này?', 'When do you want to reach it?'] },
+    { key: 'focus', label: ['Giờ tập trung', 'Focus time'], ask: ['Bạn tập trung tốt nhất lúc nào, và mỗi lần được bao lâu?', 'When do you focus best, and for how long?'] },
+    { key: 'daily', label: ['Thời gian mỗi ngày', 'Time per day'], ask: ['Mỗi ngày bạn dành được bao nhiêu thời gian cho mục tiêu này?', 'How much time a day can you give this goal?'] }
   ];
+  // Phần phiếu được giữ giữa các lần mở: "Bạn là" + "Giờ giấc hằng ngày".
+  const KEPT_INTAKE = ['role', 'wake', 'sleep', 'busy_start', 'busy_end', 'busy_days'];
+  const ROUTINE_FIELDS = ['wake', 'sleep', 'busy_start', 'busy_end', 'busy_days'];
+  const pick = (obj, keys) => Object.fromEntries(keys.filter(k => obj && obj[k] !== undefined).map(k => [k, obj[k]]));
 
   const S = {
     open: false,
@@ -113,7 +118,9 @@ const CreateStudio = (() => {
     document.body.classList.add('studio-open');
     try {
       const r = await apiRequest('/api/user/intake');
-      S.intake = r.intake || null;
+      // Chỉ giữ "Bạn là" và giờ giấc; giờ tập trung, thời gian mỗi ngày hỏi lại mỗi lần.
+      const kept = pick(r.intake, KEPT_INTAKE);
+      S.intake = Object.keys(kept).length ? kept : null;
     } catch (e) {
       S.intake = null;
     }
@@ -123,7 +130,7 @@ const CreateStudio = (() => {
       `Chào ${name || 'bạn'}! Mình sẽ hỏi ${stepsToAsk().length} câu ngắn rồi lập lịch cho bạn. Bạn có thể chọn gợi ý thay vì gõ.`,
       `Hi ${name || 'there'}! I'll ask ${stepsToAsk().length} short questions, then build your schedule. Pick a suggestion instead of typing if you like.`
     ));
-    if (S.intake) savedIntakeNote();
+    if (S.intake && (intakeHas('role') || intakeHas('routine'))) savedIntakeNote();
     renderSide();
     askCurrent();
     setTimeout(() => input.focus(), 50);
@@ -140,7 +147,13 @@ const CreateStudio = (() => {
 
   // Câu hỏi cần hỏi: bỏ các câu đã có trong phiếu đã lưu. Tính một lần khi mở (hoặc khi bấm "Sửa thông tin"),
   // không tính lại giữa chừng, nếu không trả lời xong một câu sẽ làm lệch thứ tự và bỏ sót câu sau.
-  const computeSteps = () => { S.steps = STEPS.filter(s => !(s.saved && S.intake && intakeHas(s.key))); };
+  const computeSteps = () => {
+    S.steps = STEPS.filter(s => {
+      if (s.key === 'goal') return !S.answers.goal;
+      if (s.key === 'deadline') return !S.answers.deadlineLabel;
+      return !intakeHas(s.key);
+    });
+  };
   const stepsToAsk = () => S.steps || STEPS;
   function intakeHas(key) {
     const i = S.intake || {};
@@ -186,17 +199,17 @@ const CreateStudio = (() => {
     if (i.role) parts.push(lbl(ROLE[i.role]));
     if (i.wake && i.sleep) parts.push(L(`dậy ${i.wake}, ngủ ${i.sleep}`, `up ${i.wake}, bed ${i.sleep}`));
     if (i.busy_start && i.busy_end) parts.push(L(`bận ${i.busy_start}–${i.busy_end} ${daysText(i.busy_days)}`, `busy ${i.busy_start}–${i.busy_end} ${daysText(i.busy_days)}`));
-    if (i.focus_time) parts.push(L(`tập trung ${lbl(FOCUS[i.focus_time]).toLowerCase()}, ${i.focus_minutes || 45} phút/lần`, `focus in the ${i.focus_time}, ${i.focus_minutes || 45} min`));
-    if (i.daily_minutes) parts.push(L(`${minutesText(i.daily_minutes)} mỗi ngày`, `${i.daily_minutes} min a day`));
     const el = bubble('bot note', `${L('Mình dùng thông tin bạn đã lưu', 'Using your saved info')}: ${esc(parts.join('; '))}. <button type="button" class="link-btn" data-edit-intake>${L('Sửa thông tin', 'Edit info')}</button>`);
     el.querySelector('[data-edit-intake]').addEventListener('click', () => {
-      S.intake = null;
+      // hỏi lại "Bạn là" và giờ giấc; các câu đã trả lời trong lần này (mục tiêu, thời hạn...) giữ nguyên
+      const rest = { ...(S.intake || {}) };
+      KEPT_INTAKE.forEach(k => delete rest[k]);
+      S.intake = Object.keys(rest).length ? rest : null;
       computeSteps();
       clearChips();
       msgs.querySelectorAll('.studio-form').forEach(f => f.remove());
-      // hỏi lại các câu đã lưu, giữ các câu trả lời mục tiêu / thời hạn
       if (S.draft.length) bot(L('Sửa xong, bấm "Tạo lịch trình" để lập lại bản nháp.', 'When done, press "Create schedule" to rebuild the draft.'));
-      S.stepIdx = Math.min(S.stepIdx, stepsToAsk().findIndex(s => s.saved));
+      S.stepIdx = 0;
       if (S.phase !== 'ask') S.phase = 'ask';
       renderSide();
       askCurrent();
@@ -464,8 +477,8 @@ const CreateStudio = (() => {
           wrap.remove();
           S.redoGoal = true;
           S.phase = 'ask';
-          S.stepIdx = 0;
           S.answers.goal = '';
+          S.stepIdx = Math.max(0, stepsToAsk().findIndex(s => s.key === 'goal'));
           renderSide();
           askCurrent();
         });
