@@ -490,13 +490,17 @@ function describeError(err, language) {
  * Trả lời một tin nhắn. Tin nhắn của người dùng phải đã được lưu vào ai_chats trước khi gọi.
  * @returns {{ reply: string, type: string, tasksChanged: object }}
  */
-async function generateLLMReply(db, user, userMessage, { mode = 'general', language = 'vi', intent = null, tz, draftTasks = null } = {}) {
+async function generateLLMReply(db, user, userMessage, { mode = 'general', language = 'vi', intent = null, tz, draftTasks = null, historySince = null } = {}) {
   const changes = { added: 0, updated: 0, deleted: 0, goals: 0, progress: 0, disruptions: 0 };
   // Màn hình "Tạo lịch trình": AI chỉ sửa bản nháp, người dùng bấm "Áp dụng" mới lưu.
   const draft = intent === 'create_schedule' ? cleanDraft(draftTasks) : null;
 
-  const past = await db.prepare('SELECT role, message FROM ai_chats WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
-    .all(user.id, HISTORY_LIMIT + 1);
+  // historySince: chỉ đọc tin nhắn từ mốc này (màn hình "Tạo lịch trình" mở lại thì bắt đầu sạch)
+  const past = historySince
+    ? await db.prepare('SELECT role, message FROM ai_chats WHERE user_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?')
+      .all(user.id, historySince, HISTORY_LIMIT + 1)
+    : await db.prepare('SELECT role, message FROM ai_chats WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
+      .all(user.id, HISTORY_LIMIT + 1);
   past.reverse();
   past.pop(); // bỏ tin nhắn hiện tại (đã lưu), sẽ thêm lại kèm app_state
   while (past.length && past[0].role !== 'user') past.shift();

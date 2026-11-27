@@ -49,7 +49,9 @@ const CreateStudio = (() => {
     draft: [],       // bản nháp AI đề xuất
     applied: false,  // đã áp dụng vào thời gian biểu
     busy: false,
-    phase: 'ask'     // ask | review | chat
+    phase: 'ask',    // ask | review | chat
+    session: 0,      // tăng mỗi lần mở màn hình
+    historySince: null // mốc thời gian (của server) bắt đầu lần tạo lịch này
   };
   let root, msgs, input, form, side;
 
@@ -100,6 +102,12 @@ const CreateStudio = (() => {
     S.draft = [];
     S.applied = false;
     S.phase = 'ask';
+    S.redoGoal = false;
+    S.busy = false;
+    S.session += 1;          // lượt trả lời của lần mở trước (nếu còn chạy) sẽ bị bỏ qua
+    S.historySince = null;   // lần tạo lịch mới: AI không đọc lại cuộc trò chuyện của lần trước
+    form.querySelector('button').disabled = false;
+    input.value = '';
     msgs.innerHTML = '';
     root.classList.add('open');
     document.body.classList.add('studio-open');
@@ -423,6 +431,7 @@ const CreateStudio = (() => {
     S.busy = true;
     form.querySelector('button').disabled = true;
     const wait = bubble('bot typing', `<span class="typing-dots"><i></i><i></i><i></i></span> ${L('Đang lập lịch…', 'Planning…')}`);
+    const session = S.session;
     try {
       const draftMode = !S.applied;
       const res = await apiRequest('/api/ai/chat', {
@@ -433,9 +442,13 @@ const CreateStudio = (() => {
           language: AppState.language,
           intent: draftMode ? 'create_schedule' : null,
           draft: draftMode ? S.draft : undefined,
+          // 'now' = lượt đầu của lần tạo lịch này, không đưa cuộc trò chuyện cũ cho AI
+          history_since: S.historySince || 'now',
           plan: { goal: S.answers.goal, deadline: S.answers.deadline, daily_minutes: (S.intake || {}).daily_minutes, period_days: 7 }
         })
       });
+      if (session !== S.session) return; // người dùng đã đóng và mở lại màn hình
+      if (!S.historySince && res.historySince) S.historySince = res.historySince;
       wait.remove();
       bot(res.reply || '');
       if (draftMode && Array.isArray(res.draftTasks)) {
@@ -469,9 +482,11 @@ const CreateStudio = (() => {
       }
       renderSide();
     } catch (e) {
+      if (session !== S.session) return;
       wait.remove();
       bot(L('Không kết nối được: ', 'Connection error: ') + e.message);
     } finally {
+      if (session !== S.session) return;
       S.busy = false;
       form.querySelector('button').disabled = false;
       input.focus();

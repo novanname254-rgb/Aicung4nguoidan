@@ -1090,8 +1090,9 @@ function bindMoodEvents() {
       const motivation_level = parseInt(document.getElementById('surveyMotivation').value);
       const connected_score = parseInt(document.getElementById('surveyConnected').value);
       const relaxed_score = parseInt(document.getElementById('surveyRelaxed').value);
-      const emotional_notes = document.getElementById('moodNotes').value;
-      const journal_entry = document.getElementById('moodJournalEntry').value;
+      // Form không có ô "moodNotes" riêng: dùng nội dung nhật ký làm ghi chú cảm xúc.
+      const journal_entry = (document.getElementById('moodJournalEntry')?.value || '').trim();
+      const emotional_notes = (document.getElementById('moodNotes')?.value || '').trim() || journal_entry;
 
       const res = await apiRequest('/api/mood', {
         method: 'POST',

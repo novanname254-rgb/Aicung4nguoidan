@@ -1113,6 +1113,11 @@ async function routeRequest(req, res) {
         }
 
         const now = new Date().toISOString();
+        // Màn hình "Tạo lịch trình" chỉ cho AI đọc tin nhắn từ lúc bắt đầu lần tạo lịch này
+        // ('now' = lượt đầu tiên), để mục tiêu / bản nháp của lần trước không lẫn vào.
+        const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+        const historySince = body.history_since === 'now' ? now
+          : typeof body.history_since === 'string' && ISO_RE.test(body.history_since) ? body.history_since : null;
         const userChatId = 'chat_' + crypto.randomUUID();
         await db.prepare('INSERT INTO ai_chats (id, user_id, role, message, created_at) VALUES (?, ?, ?, ?, ?)').run(
           userChatId, user.id, 'user', userMessage, now
@@ -1142,7 +1147,7 @@ async function routeRequest(req, res) {
 
         if (!aiResult && isLLMConfigured()) {
           // Trợ lý LLM (Groq): đọc dữ liệu của người dùng và tự thêm / sửa / xoá việc trong lịch.
-          aiResult = await generateLLMReply(db, user, userMessage, { mode, language, intent, tz, draftTasks: Array.isArray(body.draft) ? body.draft : null });
+          aiResult = await generateLLMReply(db, user, userMessage, { mode, language, intent, tz, draftTasks: Array.isArray(body.draft) ? body.draft : null, historySince });
         } else if (!aiResult) {
           // Chưa cấu hình GROQ_API_KEY: dùng bộ luật cũ.
           const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
@@ -1169,6 +1174,7 @@ async function routeRequest(req, res) {
           suggestedTasks: aiResult.suggestedTasks || [],
           tasksChanged: aiResult.tasksChanged || null,
           draftTasks: aiResult.draftTasks || null,
+          historySince,
           llm: isLLMConfigured(),
           retryable: Boolean(aiResult.retryable)
         });
