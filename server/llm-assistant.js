@@ -159,6 +159,12 @@ function cleanTaskFields(raw, partial) {
     if (!d) return [null, 'duration_minutes must be an integer between 1 and 1440.'];
     out.duration_minutes = d;
   }
+  // Model hay chỉ gửi giờ bắt đầu + thời lượng: tự tính giờ kết thúc, để việc hiện trên lưới và được kiểm tra trùng giờ.
+  if (out.start_time && !out.end_time && out.duration_minutes) {
+    const end = P.toMin(out.start_time) + out.duration_minutes;
+    if (end > 24 * 60 - 1) return [null, 'start_time + duration_minutes must end before 24:00.'];
+    out.end_time = P.toHM(end);
+  }
   if (raw.goal_id !== undefined) out.goal_id = raw.goal_id ? String(raw.goal_id) : null;
   if (raw.description !== undefined) out.description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 1000) : '';
   return [out, null];
@@ -195,9 +201,13 @@ async function runTool(db, user, name, argsText, changes, tz, draft = null) {
       extraTasks: draft ? draft.tasks : [],
       fallbackBlocks: P.intakeBlocks(P.readIntake(user))
     });
-    // Gọn để tiết kiệm token: "ngày start-end phút loại"
-    const lines = slots.slice(0, 60).map(f => `${f.date} ${f.start}-${f.end} ${f.minutes}m${f.kind === 'study_block' ? ' study' : ''}`);
-    return lines.length ? lines.join('\n') + (slots.length > 60 ? `\n(+${slots.length - 60} more; narrow the range)` : '') : 'No free slots.';
+    // Gọn để tiết kiệm token (gói miễn phí Groq ~8.000 token/phút): mỗi ngày một dòng "ngày: start-end, start-end*"
+    // (* = trong khung Tự học). Tối đa 40 khoảng.
+    const shown = slots.slice(0, 40);
+    const byDay = {};
+    shown.forEach(f => (byDay[f.date] = byDay[f.date] || []).push(`${f.start}-${f.end}${f.kind === 'study_block' ? '*' : ''}`));
+    const lines = Object.entries(byDay).map(([d, list]) => `${d}: ${list.join(', ')}`);
+    return lines.length ? lines.join('\n') + (slots.length > 40 ? `\n(+${slots.length - 40} more; narrow the range)` : '') + '\n(* = study block)' : 'No free slots.';
   }
 
   if (name === 'add_tasks') {
@@ -426,7 +436,7 @@ async function callGroq(messages, model) {
   const res = await fetch(GROQ_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 4000 }),
+    body: JSON.stringify({ model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 2000 }),
     signal: AbortSignal.timeout(50000)
   });
   if (!res.ok) {
@@ -482,6 +492,7 @@ function describeError(err, language) {
       ? `Trợ lý AI đang hết lượt dùng miễn phí trong phút này (giới hạn của Groq). Mình đã tự đợi và thử lại nhưng chưa được. Bấm "Thử lại" sau khoảng ${sec} giây nhé.`
       : `The AI hit Groq's free per-minute limit; automatic retries didn't succeed. Press "Retry" in about ${sec} seconds.`;
   }
+  if (err.status === 413) return vi ? 'Yêu cầu quá dài so với giới hạn gói miễn phí của Groq. Hãy thử lập lịch cho ít ngày hơn.' : "The request is too long for Groq's free tier. Try planning fewer days.";
   if (err.name === 'TimeoutError') return vi ? 'Trợ lý AI phản hồi quá lâu, thử gửi lại nhé.' : 'The AI took too long to respond, please try again.';
   return vi ? 'Trợ lý AI đang gặp sự cố, thử lại sau ít phút nhé.' : 'The AI assistant hit a problem, please try again in a moment.';
 }
@@ -537,6 +548,19 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
     return { reply, type: 'llm_response', tasksChanged: changes, draftTasks: draft ? draft.tasks : undefined };
   } catch (err) {
     console.error('[LifeCare AI] Groq call failed:', err.message);
+    // Bản nháp đã lập xong, chỉ lượt trả lời cuối bị giới hạn (thường là hết token/phút):
+    // vẫn đưa bản nháp cho người dùng xem và áp dụng, không báo lỗi.
+    if (draft && changes.draft && draft.tasks.length) {
+      const n = draft.tasks.length;
+      return {
+        reply: language === 'en'
+          ? `Your draft is ready: ${n} sessions, none overlapping your schedule. Check it on the right and press "Apply to timetable" when it looks right, or tell me what to change.`
+          : `Bản nháp đã xong: ${n} buổi, không trùng lịch có sẵn. Xem bên phải, thấy ổn thì bấm "Áp dụng vào thời gian biểu", hoặc nhắn mình cần đổi gì.`,
+        type: 'llm_response',
+        draftTasks: draft.tasks,
+        tasksChanged: changes
+      };
+    }
     // Có thể đã đổi một phần dữ liệu trước khi lỗi: vẫn báo để giao diện tải lại.
     return { reply: describeError(err, language), draftTasks: draft ? draft.tasks : undefined, type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
   }
