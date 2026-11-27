@@ -292,22 +292,37 @@ function renderDay(area, d) {
 let routineBlocks = [];
 const PX_PER_MIN = 0.5; // chiều cao lưới tuần: 24h = 720px
 
-async function loadRoutine() {
+/**
+ * silent = true: tải lại sau khi kéo thả / sửa nhỏ. Giữ nguyên lưới đang hiện (không xoá rồi hiện "Đang tải"),
+ * giữ vị trí cuộn, chỉ thay nội dung khi có dữ liệu mới nên không bị giật.
+ */
+let routineLoadToken = 0;
+async function loadRoutine({ silent = false } = {}) {
   AppState.routineAnchor = AppState.routineAnchor || mondayOf(todayLocal());
   const start = AppState.routineAnchor;
   const end = addDaysStr(start, 6);
   document.getElementById('routineWeekLabel').textContent = `${fmtDM(start)} – ${fmtDMY(end)}`;
   document.getElementById('routineTzLabel').textContent = L(`Múi giờ: ${USER_TZ}.`, `Timezone: ${USER_TZ}.`);
   const grid = document.getElementById('routineWeekGrid');
-  grid.innerHTML = `<div class="cal-loading">⌛ ${L('Đang tải...', 'Loading...')}</div>`;
+  const hasGrid = !!grid.querySelector('.rw-scroll');
+  if (silent && hasGrid) {
+    const sc = grid.querySelector('.rw-scroll');
+    if (routineKeepScroll == null && sc) routineKeepScroll = sc.scrollTop;
+  } else {
+    grid.innerHTML = `<div class="cal-loading">⌛ ${L('Đang tải...', 'Loading...')}</div>`;
+  }
+  const token = ++routineLoadToken;
   try {
     const [r, sch] = await Promise.all([apiRequest('/api/routine'), apiRequest(`/api/schedule?start=${start}&end=${end}`)]);
+    if (token !== routineLoadToken) return; // đã có lần tải mới hơn
+    if (routineDrag && routineDrag.active) return; // đang kéo dở: không vẽ đè
     routineBlocks = r.blocks || [];
     renderBlockLegend();
     renderRoutineGrid(grid, sch.days);
     renderBlockList();
   } catch (err) {
-    grid.innerHTML = `<div class="cal-error">⚠️ ${escapeHTML(err.message)}</div>`;
+    if (silent && hasGrid) showToast(err.message, 'error');
+    else grid.innerHTML = `<div class="cal-error">⚠️ ${escapeHTML(err.message)}</div>`;
   }
 }
 
@@ -599,7 +614,7 @@ async function onRoutineDragEnd() {
       showToast(err.message, 'error');
     }
     routineKeepScroll = sc0 ? sc0.scrollTop : null;
-    loadRoutine();
+    loadRoutine({ silent: true });
     return;
   }
 
@@ -625,7 +640,7 @@ async function onRoutineDragEnd() {
     showToast(err.message, 'error');
   }
   routineKeepScroll = sc ? sc.scrollTop : null;
-  loadRoutine();
+  loadRoutine({ silent: true });
 }
 
 // Khung giờ cố định lưu "HH:MM"; hết lúc 24:00 thì ghi là 00:00 (máy chủ hiểu là kết thúc lúc nửa đêm).
@@ -648,8 +663,15 @@ async function dropRoutineBlock(d, target) {
     if (days.length === 1) {
       await apiRequest(`/api/routine/${encodeURIComponent(block.id)}`, { method: 'PUT', body: JSON.stringify({ ...times, days: [toDay] }) });
     } else {
+      // Tạo khung giờ mới trước (máy chủ kiểm tra trùng giờ), xong mới bỏ thứ cũ khỏi khung giờ lặp.
+      // Khung giờ lặp vẫn còn ở thứ cũ lúc kiểm tra, nên tạm bỏ thứ đó ra rồi trả lại nếu bị từ chối.
       await apiRequest(`/api/routine/${encodeURIComponent(block.id)}`, { method: 'PUT', body: JSON.stringify({ days: days.filter(x => x !== fromDay) }) });
-      await apiRequest('/api/routine', { method: 'POST', body: JSON.stringify({ block_type: block.block_type, label: block.label, ...times, days: [toDay] }) });
+      try {
+        await apiRequest('/api/routine', { method: 'POST', body: JSON.stringify({ block_type: block.block_type, label: block.label, ...times, days: [toDay] }) });
+      } catch (err) {
+        await apiRequest(`/api/routine/${encodeURIComponent(block.id)}`, { method: 'PUT', body: JSON.stringify({ days }) }).catch(() => {});
+        throw err;
+      }
     }
     showToast(d.mode === 'move' ? L(
       `Đã chuyển "${name}" sang ${DAY_SHORT[toDay]}, ${target.start}–${target.end} (lặp lại mỗi tuần).`,
@@ -662,7 +684,7 @@ async function dropRoutineBlock(d, target) {
     showToast(err.message, 'error');
   }
   routineKeepScroll = sc ? sc.scrollTop : null;
-  loadRoutine();
+  loadRoutine({ silent: true });
 }
 
 /** Thả một nhãn từ hàng chú thích: "Công việc" mở form thêm việc, các loại khác tạo khung giờ mới cho thứ đó. */
@@ -687,7 +709,7 @@ async function dropNewItem(d, target) {
     showToast(err.message, 'error');
   }
   routineKeepScroll = sc ? sc.scrollTop : null;
-  loadRoutine();
+  loadRoutine({ silent: true });
 }
 
 function renderBlockList() {
@@ -718,7 +740,7 @@ function renderBlockList() {
     if (!confirm(L('Xoá khung giờ này khỏi mọi tuần?', 'Delete this block from every week?'))) return;
     try {
       await apiRequest(`/api/routine/${b.dataset.delBlock}`, { method: 'DELETE' });
-      loadRoutine();
+      loadRoutine({ silent: true });
     } catch (err) { showToast(err.message, 'error'); }
   }));
 }
@@ -794,7 +816,7 @@ async function deletePlans(ids) {
     const res = await apiRequest('/api/tasks/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
     closeModal('deletePlansModal');
     showToast(L(`Đã xóa ${res.deleted} kế hoạch.`, `Deleted ${res.deleted} plans.`), 'success');
-    loadRoutine();
+    loadRoutine({ silent: true });
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -852,7 +874,7 @@ async function deleteBlockFromModal() {
     showToast(L(`Đã xóa khung giờ "${name}".`, `Deleted the "${name}" block.`), 'success');
     const sc = document.querySelector('#routineWeekGrid .rw-scroll');
     routineKeepScroll = sc ? sc.scrollTop : null;
-    loadRoutine();
+    loadRoutine({ silent: true });
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -1127,7 +1149,7 @@ async function deleteDisruption(id) {
     await apiRequest(`/api/disruptions/${id}`, { method: 'DELETE' });
     showToast(L('Đã xoá gián đoạn.', 'Disruption removed.'));
     if (AppState.activeView === 'planner') renderCalendar();
-    if (AppState.activeView === 'routine') loadRoutine();
+    if (AppState.activeView === 'routine') loadRoutine({ silent: true });
   } catch (err) { showToast(err.message, 'error'); }
 }
 
@@ -1496,7 +1518,7 @@ function bindPlanningUI() {
       const affected = res.affectedTasks || [];
       showToast(L(`Đã ghi gián đoạn. ${affected.length} việc bị ảnh hưởng.`, `Saved. ${affected.length} tasks affected.`));
       if (AppState.activeView === 'planner') renderCalendar();
-      if (AppState.activeView === 'routine') loadRoutine();
+      if (AppState.activeView === 'routine') loadRoutine({ silent: true });
       if (document.getElementById('disAiReplan').checked && (affected.length || body.kind === 'new_work')) {
         const when = allDay ? L('cả ngày', 'all day') : `${body.start_time}–${body.end_time}`;
         const affectedList = affected.map(t => `"${t.title}" (id ${t.id})`).join(', ');
@@ -1537,7 +1559,7 @@ function bindPlanningUI() {
         body: JSON.stringify({ template: document.getElementById('routineTemplateSelect').value, days, replace })
       });
       showToast(L(`Đã thêm ${res.created} khung giờ. Lịch sẽ tự lặp lại mỗi tuần.`, `${res.created} blocks added.`));
-      loadRoutine();
+      loadRoutine({ silent: true });
     } catch (err) { showToast(err.message, 'error'); }
   });
   document.getElementById('btnDeleteBlock').addEventListener('click', deleteBlockFromModal);
@@ -1555,7 +1577,7 @@ function bindPlanningUI() {
     try {
       await apiRequest(id ? `/api/routine/${id}` : '/api/routine', { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
       closeModal('blockModal');
-      loadRoutine();
+      loadRoutine({ silent: true });
     } catch (err) { showToast(err.message, 'error'); }
   });
 

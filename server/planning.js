@@ -113,10 +113,14 @@ function subtract(ranges, busy) {
  * Khoảng trống từ startDate đến endDate.
  * kind "free": ngoài mọi time block; kind "study_block": phần còn trống trong khung "Tự học".
  */
-async function findFreeSlots(db, userId, startDate, endDate, { minMinutes = 30, tz } = {}) {
+async function findFreeSlots(db, userId, startDate, endDate, { minMinutes = 30, tz, extraTasks = [], fallbackBlocks = [] } = {}) {
   const now = localNow(tz);
-  const blocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(userId);
-  const tasks = await db.prepare('SELECT date, start_time, end_time FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(userId, startDate, endDate);
+  let blocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(userId);
+  if (!blocks.length) blocks = fallbackBlocks; // chưa có thời gian biểu: dùng giờ ngủ / giờ học từ phiếu thông tin
+  const tasks = [
+    ...await db.prepare('SELECT date, start_time, end_time FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(userId, startDate, endDate),
+    ...extraTasks
+  ];
   const disruptions = await db.prepare('SELECT * FROM disruptions WHERE user_id = ? AND date >= ? AND date <= ?').all(userId, startDate, endDate);
   const slots = [];
   for (let d = startDate, guard = 0; d <= endDate && guard < 92; d = addDays(d, 1), guard++) {
@@ -288,8 +292,174 @@ const ROUTINE_TEMPLATES = {
   ]
 };
 
+// ---------------------------------------------------------------- phiếu thông tin lập lịch (hỏi một lần, lưu lại)
+// Lưu trong users.psych_profile dưới khoá "intake":
+// { role, wake, sleep, busy_start, busy_end, busy_days[], focus_time, focus_minutes, daily_minutes, updated_at }
+const INTAKE_ROLES = ['student', 'university', 'worker', 'other'];
+const FOCUS_TIMES = ['morning', 'afternoon', 'evening', 'night'];
+
+function cleanIntake(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const time = v => (isTime(v) ? v : null);
+  const num = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : null; };
+  const out = {
+    role: INTAKE_ROLES.includes(raw.role) ? raw.role : null,
+    wake: time(raw.wake),
+    sleep: time(raw.sleep),
+    busy_start: time(raw.busy_start),
+    busy_end: time(raw.busy_end),
+    busy_days: parseDays(raw.busy_days),
+    focus_time: FOCUS_TIMES.includes(raw.focus_time) ? raw.focus_time : null,
+    focus_minutes: num(raw.focus_minutes, 10, 240),
+    daily_minutes: num(raw.daily_minutes, 10, 720),
+    updated_at: new Date().toISOString()
+  };
+  if (out.busy_start && out.busy_end && out.busy_end <= out.busy_start) { out.busy_start = null; out.busy_end = null; }
+  return out;
+}
+
+function readIntake(user) {
+  try {
+    const p = JSON.parse((user && user.psych_profile) || '{}') || {};
+    return p.intake && typeof p.intake === 'object' ? p.intake : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Khung giờ suy ra từ phiếu thông tin: ngủ, đi học/đi làm, ba bữa ăn. Dùng khi người dùng chưa có thời gian biểu. */
+function intakeBlocks(intake) {
+  if (!intake) return [];
+  const out = [];
+  const shift = (hm, m) => toHM(Math.max(0, Math.min(1439, toMin(hm) + m)));
+  if (intake.sleep && intake.wake) out.push({ id: 'intake_sleep', block_type: 'sleep', label: 'Ngủ', start_time: intake.sleep, end_time: intake.wake, days: ALL_DAYS.join(',') });
+  if (intake.busy_start && intake.busy_end && intake.busy_days && intake.busy_days.length) {
+    const label = intake.role === 'worker' ? 'Giờ làm việc' : 'Học trên lớp';
+    out.push({ id: 'intake_busy', block_type: 'school', label, start_time: intake.busy_start, end_time: intake.busy_end, days: intake.busy_days.join(',') });
+  }
+  if (intake.wake) out.push({ id: 'intake_breakfast', block_type: 'meal', label: 'Ăn sáng', start_time: shift(intake.wake, 15), end_time: shift(intake.wake, 45), days: ALL_DAYS.join(',') });
+  out.push({ id: 'intake_lunch', block_type: 'meal', label: 'Ăn trưa', start_time: '11:45', end_time: '12:30', days: ALL_DAYS.join(',') });
+  out.push({ id: 'intake_dinner', block_type: 'meal', label: 'Ăn tối', start_time: '18:45', end_time: '19:30', days: ALL_DAYS.join(',') });
+  return out;
+}
+
+// ---------------------------------------------------------------- chống trùng giờ
+const overlaps = (a, b) => a.start < b.end && b.start < a.end;
+
+/**
+ * Tìm thứ đang chiếm khung giờ [start_time, end_time) của ngày `date`.
+ * - Công việc khác cùng ngày (trừ excludeId) và các bản nháp trong extraTasks: luôn bị chặn.
+ * - checkBlocks: khung giờ cố định (trừ "Tự học", nơi được xếp việc học) cũng bị chặn.
+ * Trả về null nếu trống, hoặc { kind: 'task' | 'block', title, start, end }.
+ */
+async function findConflict(db, userId, { date, start_time, end_time, excludeId = null, extraTasks = [], checkBlocks = false, fallbackBlocks = [] }) {
+  if (!isRealDate(date) || !isTime(start_time) || !isTime(end_time) || end_time <= start_time) return null;
+  const me = { start: toMin(start_time), end: toMin(end_time) };
+  const rows = await db.prepare('SELECT id, title, start_time, end_time FROM tasks WHERE user_id = ? AND date = ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(userId, date);
+  for (const t of [...rows.filter(r => r.id !== excludeId), ...extraTasks.filter(x => x.date === date)]) {
+    if (!isTime(t.start_time) || !isTime(t.end_time)) continue;
+    if (overlaps(me, { start: toMin(t.start_time), end: toMin(t.end_time) })) return { kind: 'task', title: t.title, start: t.start_time, end: t.end_time };
+  }
+  if (checkBlocks) {
+    let blocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(userId);
+    if (!blocks.length) blocks = fallbackBlocks;
+    for (const b of blocksForDate(blocks, date)) {
+      if (b.block_type === 'study') continue;
+      if (overlaps(me, b)) return { kind: 'block', title: b.label || BLOCK_LABELS[b.block_type], start: toHM(b.start), end: b.end === 1440 ? '24:00' : toHM(b.end) };
+    }
+  }
+  return null;
+}
+
+// Một tuần mẫu (2024-01-01 là thứ Hai) để so khung giờ lặp theo thứ.
+const REFERENCE_WEEK = ['2024-01-01', '2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05', '2024-01-06', '2024-01-07'];
+
+/** Khung giờ cố định `candidate` có đè lên khung giờ khác không (xét cả khung qua đêm)? Trả về khung bị đè hoặc null. */
+function findBlockConflict(blocks, candidate, excludeId = null) {
+  const others = blocks.filter(b => b.id !== excludeId);
+  const cand = { ...candidate, id: '__candidate__' };
+  for (const date of REFERENCE_WEEK) {
+    const ranges = blocksForDate([...others, cand], date);
+    const mine = ranges.filter(r => r.id === '__candidate__');
+    for (const m of mine) {
+      const hit = ranges.find(r => r.id !== '__candidate__' && overlaps(m, r));
+      if (hit) return { title: hit.label || BLOCK_LABELS[hit.block_type], start: hit.start_time, end: hit.end_time, day: dayKey(date) };
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- kiểm tra mục tiêu thực tế + bản nháp đơn giản (khi chưa có AI)
+/** Trả về câu giải thích nếu mục tiêu bất khả thi (VD: IELTS 10.0), ngược lại null. */
+function unrealisticGoal(text) {
+  const s = String(text || '').toLowerCase().replace(',', '.');
+  const num = re => { const m = s.match(re); return m ? Number(m[1]) : null; };
+  const ielts = num(/ielts[^0-9]{0,12}(\d+(?:\.\d+)?)/);
+  if (ielts != null && ielts > 9) return `IELTS tối đa là 9.0 nên không có ${ielts.toFixed(1)}. Hãy chọn mức thực tế hơn, ví dụ tăng 0.5–1.0 band so với hiện tại trong 2–3 tháng.`;
+  const toeic = num(/toeic[^0-9]{0,12}(\d{3,4})/);
+  if (toeic != null && toeic > 990) return `TOEIC tối đa là 990 điểm. Hãy đặt mục tiêu trong khoảng đó, ví dụ tăng 100–150 điểm sau 2 tháng.`;
+  const sat = num(/\bsat[^0-9]{0,12}(\d{3,4})/);
+  if (sat != null && sat > 1600) return `SAT tối đa là 1600 điểm. Hãy đặt mục tiêu trong khoảng đó.`;
+  const kg = s.match(/giảm\s*(\d+(?:\.\d+)?)\s*kg[^0-9]{0,20}(\d+)\s*(ngày|tuần|tháng)/);
+  if (kg) {
+    const weeks = Number(kg[2]) * (kg[3] === 'ngày' ? 1 / 7 : kg[3] === 'tháng' ? 4.3 : 1);
+    if (weeks > 0 && Number(kg[1]) / weeks > 1.2) return `Giảm ${kg[1]} kg trong ${kg[2]} ${kg[3]} là quá nhanh và không an toàn. Mức hợp lý là khoảng 0,5–1 kg mỗi tuần.`;
+  }
+  return null;
+}
+
+const FOCUS_ORDER = { morning: [6, 12], afternoon: [12, 17], evening: [17, 22], night: [20, 24] };
+
+/**
+ * Bản nháp đơn giản khi chưa có LLM: mỗi ngày một phiên làm mục tiêu (dài theo thời gian/ngày và
+ * giới hạn tập trung), đặt vào khoảng trống gần giờ tập trung tốt nhất. Không bao giờ đè lên lịch khác.
+ */
+async function simpleDraft(db, user, plan, tz) {
+  const intake = readIntake(user) || {};
+  const today = localNow(tz).date;
+  const days = Math.max(1, Math.min(14, Number(plan.period_days) || 7));
+  const end = plan.deadline && isRealDate(plan.deadline) && plan.deadline >= today ? (plan.deadline < addDays(today, days - 1) ? plan.deadline : addDays(today, days - 1)) : addDays(today, days - 1);
+  const daily = Math.max(15, Math.min(240, Number(plan.daily_minutes) || intake.daily_minutes || 60));
+  const focusMax = Math.max(15, Math.min(120, intake.focus_minutes || 45));
+  // Chia thời gian mỗi ngày thành các phiên không dài quá sức tập trung (bước 15 phút, tối đa 3 phiên)
+  const sessionsPerDay = Math.max(1, Math.min(3, Math.ceil(daily / focusMax)));
+  const session = Math.max(15, Math.round(daily / sessionsPerDay / 15) * 15);
+  const [fromH, toH] = FOCUS_ORDER[intake.focus_time] || [17, 22];
+  const title = String(plan.goal || 'Mục tiêu').trim().slice(0, 80);
+  const slots = await findFreeSlots(db, user.id, today, end, { minMinutes: session, tz, fallbackBlocks: intakeBlocks(intake) });
+  const tasks = [];
+  for (let d = today; d <= end; d = addDays(d, 1)) {
+    const daySlots = slots.filter(x => x.date === d)
+      .map(x => ({ ...x, s: toMin(x.start), e: x.end === '24:00' ? 1440 : toMin(x.end) }))
+      .sort((a, b) => {
+        const score = x => (x.s >= fromH * 60 && x.s < toH * 60 ? 0 : 1) + (x.kind === 'study_block' ? -0.5 : 0);
+        return score(a) - score(b) || a.s - b.s;
+      });
+    let placed = 0;
+    for (const sl of daySlots) {
+      // Bắt đầu từ giờ tập trung tốt nhất nếu khoảng trống còn đủ chỗ, không thì từ đầu khoảng trống
+      const fromFocus = Math.max(sl.s, fromH * 60);
+      let cursor = Math.ceil((fromFocus + session <= sl.e ? fromFocus : sl.s) / 15) * 15;
+      while (placed < sessionsPerDay && cursor + session <= sl.e) {
+        tasks.push({ title: placed ? `${title} (phiên ${placed + 1})` : title, date: d, start_time: toHM(cursor), end_time: toHM(cursor + session), duration_minutes: session, category: 'Study', priority: 'high', description: plan.goal ? `Làm cho mục tiêu: ${plan.goal}` : '' });
+        placed++;
+        cursor += session + 15; // nghỉ 15 phút giữa hai phiên
+      }
+      if (placed >= sessionsPerDay) break;
+    }
+  }
+  return tasks;
+}
+
+function conflictMessage(c, lang = 'vi') {
+  if (!c) return '';
+  if (lang === 'en') return `This time overlaps "${c.title}" (${c.start}–${c.end}). Pick a free time.`;
+  return `Khung giờ này trùng với "${c.title}" (${c.start}–${c.end}). Hãy chọn giờ còn trống.`;
+}
+
 module.exports = {
   DEFAULT_TZ, DAY_KEYS, BLOCK_TYPES, BLOCK_LABELS, DISRUPTION_KINDS, DISRUPTION_LABELS, ROUTINE_TEMPLATES,
   validTimezone, localNow, isRealDate, isTime, toMin, toHM, addDays, daysBetween, dayKey, parseDays, taskMinutes,
-  blocksForDate, findFreeSlots, syncTaskProgress, addProgressLog, goalProgress, goalsWithProgress
+  blocksForDate, findFreeSlots, syncTaskProgress, addProgressLog, goalProgress, goalsWithProgress,
+  cleanIntake, readIntake, intakeBlocks, findConflict, findBlockConflict, conflictMessage, unrealisticGoal, simpleDraft
 };
