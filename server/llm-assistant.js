@@ -17,6 +17,13 @@ const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 // Groq tính hạn mức token/phút RIÊNG cho từng model: hết hạn mức ở model chính thì chuyển sang model này.
 // Đặt GROQ_FALLBACK_MODEL=none để tắt.
 const FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL === 'none' ? null : (process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b');
+// Dự phòng khi Groq lỗi / hết lượt: Gemini qua cổng tương thích OpenAI của Google.
+// Gói miễn phí của Gemini cho phép Google dùng dữ liệu gửi lên, nên chỉ gửi bản rút gọn (xem buildAppState lite).
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+const REQUEST_BUDGET_MS = 55000; // Vercel cắt hàm sau 60 giây
+const hasGroq = () => Boolean(process.env.GROQ_API_KEY);
+const hasGemini = () => Boolean(process.env.GEMINI_API_KEY);
 const RETRY_BUDGET_MS = 25000;   // tổng thời gian tối đa chờ hạn mức trong một tin nhắn
 const MAX_SINGLE_WAIT_MS = 12000; // Groq bắt chờ lâu hơn mức này thì báo ngay để người dùng bấm "Thử lại"
 const MAX_TOOL_TURNS = 8;
@@ -109,6 +116,20 @@ const TOOLS = [
     kind: { type: 'string', enum: P.DISRUPTION_KINDS }, date: { type: 'string' }, start_time: opt('string'), end_time: opt('string'), note: opt('string')
   }, ['kind', 'date'])
 ];
+
+// Schema cho Gemini: bỏ kiểu "null" (cổng OpenAI của Gemini có thể không nhận mảng kiểu); model bỏ trống trường thay vì gửi null.
+function stripNullable(schema) {
+  if (Array.isArray(schema)) return schema.map(stripNullable);
+  if (!schema || typeof schema !== 'object') return schema;
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'type' && Array.isArray(v)) out.type = v.find(t => t !== 'null') || 'string';
+    else if (k === 'enum' && Array.isArray(v)) out.enum = v.filter(x => x !== null);
+    else out[k] = stripNullable(v);
+  }
+  return out;
+}
+const GEMINI_TOOLS = stripNullable(TOOLS);
 
 // ---------------------------------------------------------------- kiểm tra dữ liệu model gửi
 function pickEnum(value, list) {
@@ -400,7 +421,11 @@ function intakeLine(user) {
 
 const draftLine = d => [d.id, d.date, d.start_time ? `${d.start_time}-${d.end_time || ''}` : 'allday', d.title, d.category, d.priority, d.duration_minutes ? `${d.duration_minutes}m` : ''].join('|');
 
-async function buildAppState(db, user, language, tz) {
+/**
+ * lite = true: bản gửi cho Gemini (gói miễn phí). Chỉ lịch, khung giờ, mục tiêu, giờ giấc;
+ * không có tên, tâm lý nền, sức khoẻ, tâm trạng, ghi chú gián đoạn.
+ */
+async function buildAppState(db, user, language, tz, { lite = false } = {}) {
   const now = P.localNow(tz);
   const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, start_time ASC LIMIT 80')
     .all(user.id, P.addDays(now.date, -2), P.addDays(now.date, 7));
@@ -408,11 +433,23 @@ async function buildAppState(db, user, language, tz) {
   const disruptions = await db.prepare('SELECT kind, date, start_time, end_time, note FROM disruptions WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date LIMIT 15')
     .all(user.id, P.addDays(now.date, -1), P.addDays(now.date, 14));
   const goals = await P.goalsWithProgress(db, user.id, tz, { includeDone: false });
+  const daysText = d => (d === 'mon,tue,wed,thu,fri,sat,sun' ? 'every day' : d === 'mon,tue,wed,thu,fri' ? 'mon-fri' : d);
+  const lines = [
+    `today: ${now.date} (${now.weekday}) ${now.time} ${now.timezone}; reply language: ${language}`,
+    intakeLine(user),
+    `blocks:\n${blocks.map(b => `${b.block_type}${b.label ? ` "${b.label}"` : ''} ${b.start_time}-${b.end_time} ${daysText(b.days)}`).join('\n') || 'none'}`,
+    `tasks (id|date|time|title|category|priority|status|duration|deadline|goal):\n${tasks.map(taskLine).join('\n') || 'none'}`,
+    `goals:\n${goals.map(g => `${g.id} "${g.title}" deadline ${g.deadline || '-'} ${g.priority}; ${g.progress.percent}% (${g.progress.done_minutes}/${g.progress.planned_minutes}m), scheduled ahead ${g.progress.scheduled_minutes_ahead}m, forecast ${g.progress.forecast.projected_date || '-'}${g.progress.forecast.days_vs_deadline != null ? ` (${g.progress.forecast.days_vs_deadline} days vs deadline)` : ''}; feasibility ${g.progress.feasibility.level}`).join('\n') || 'none'}`
+  ];
+  if (lite) {
+    lines.push(`disruptions:\n${disruptions.map(x => `${x.date} ${x.start_time ? `${x.start_time}-${x.end_time}` : 'all day'} ${x.kind}`).join('\n') || 'none'}`);
+    lines.push('profile, psych baseline, health and mood: not shared in this request');
+    return lines.join('\n');
+  }
   const health = await db.prepare(`SELECT checkin_date, sleep_duration, sleep_quality, energy_level, exercise_duration, water_ml, discomfort
     FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 5`).all(user.id);
   const mood = await db.prepare(`SELECT checkin_date, mood, stress_level, motivation_level, emotional_notes
     FROM mood_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 5`).all(user.id);
-  const daysText = d => (d === 'mon,tue,wed,thu,fri,sat,sun' ? 'every day' : d === 'mon,tue,wed,thu,fri' ? 'mon-fri' : d);
   const psych = parseJSON(user.psych_profile);
   return [
     `today: ${now.date} (${now.weekday}) ${now.time} ${now.timezone}; reply language: ${language}`,
@@ -428,18 +465,23 @@ async function buildAppState(db, user, language, tz) {
   ].join('\n');
 }
 
-async function callGroq(messages, model, { json = false } = {}) {
-  const res = await fetch(GROQ_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify(json
+async function callGroq(messages, model, { json = false, provider = 'groq', timeoutMs = 50000 } = {}) {
+  const gemini = provider === 'gemini';
+  // Gemini: không gửi response_format (tài liệu cổng OpenAI chưa nêu rõ json_object); prompt đã yêu cầu chỉ trả JSON
+  const body = gemini
+    ? (json ? { model, messages, max_tokens: 4000 } : { model, messages, tools: GEMINI_TOOLS, tool_choice: 'auto', max_tokens: 4000 })
+    : (json
       ? { model, messages, response_format: { type: 'json_object' }, max_completion_tokens: 2500 }
-      : { model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 2000 }),
-    signal: AbortSignal.timeout(50000)
+      : { model, messages, tools: TOOLS, tool_choice: 'auto', max_completion_tokens: 2000 });
+  const res = await fetch(gemini ? GEMINI_URL : GROQ_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gemini ? process.env.GEMINI_API_KEY : process.env.GROQ_API_KEY}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs)
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    const err = new Error(`Groq HTTP ${res.status} (${model}): ${detail.slice(0, 300)}`);
+    const err = new Error(`${gemini ? 'Gemini' : 'Groq'} HTTP ${res.status} (${model}): ${detail.slice(0, 300)}`);
     err.status = res.status;
     // Groq cho biết cần đợi bao lâu: header retry-after hoặc "try again in 10.095s" trong nội dung
     const header = Number(res.headers?.get?.('retry-after'));
@@ -457,6 +499,10 @@ async function callGroq(messages, model, { json = false } = {}) {
 async function callGroqResilient(messages, ctx) {
   for (;;) {
     try {
+      if (ctx.provider === 'gemini') {
+        const left = REQUEST_BUDGET_MS - (Date.now() - ctx.requestStartedAt);
+        return await callGroq(messages, GEMINI_MODEL, { json: !!ctx.json, provider: 'gemini', timeoutMs: Math.max(5000, Math.min(40000, left)) });
+      }
       return await callGroq(messages, ctx.model, { json: !!ctx.json });
     } catch (err) {
       // Model viết lệnh gọi công cụ hỏng (JSON sai / sai schema): thử lại một lần
@@ -465,7 +511,7 @@ async function callGroqResilient(messages, ctx) {
         console.warn(`[LifeCare AI] ${ctx.model} gọi công cụ hỏng, thử lại một lần`);
         continue;
       }
-      if (err.status !== 429) throw err;
+      if (err.status !== 429 || ctx.provider === 'gemini') throw err;
       if (ctx.model !== FALLBACK_MODEL && FALLBACK_MODEL && !ctx.triedFallback) {
         console.warn(`[LifeCare AI] ${ctx.model} hết hạn mức, chuyển sang ${FALLBACK_MODEL}`);
         ctx.triedFallback = true;
@@ -473,7 +519,9 @@ async function callGroqResilient(messages, ctx) {
         ctx.model = FALLBACK_MODEL;
         continue;
       }
-      // Cả hai model đều hết hạn mức: đợi model nào hồi sớm hơn
+      // Cả hai model Groq đều hết hạn mức. Có Gemini dự phòng thì chuyển luôn, khỏi bắt người dùng chờ.
+      if (hasGemini()) throw err;
+      // Không có Gemini: đợi model nào hồi sớm hơn
       const waitPrimary = ctx.primaryBlockedUntil ? Math.max(0, ctx.primaryBlockedUntil - Date.now()) : Infinity;
       const wait = Math.min(err.retryAfterMs, waitPrimary) + 300;
       if (wait > MAX_SINGLE_WAIT_MS || Date.now() - ctx.startedAt + wait > RETRY_BUDGET_MS) {
@@ -520,37 +568,43 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
   past.pop(); // bỏ tin nhắn hiện tại (đã lưu), sẽ thêm lại kèm app_state
   while (past.length && past[0].role !== 'user') past.shift();
 
-  let appState = await buildAppState(db, user, language, tz);
-  if (draft) {
-    appState += `\ndraft (id|date|time|title|category|priority|duration), not saved yet:\n${draft.tasks.map(draftLine).join('\n') || 'empty'}`;
-    // Gửi sẵn giờ trống 7 ngày tới (trừ bản nháp) để AI lập bản nháp trong MỘT lần gọi:
-    // gói miễn phí Groq chỉ ~8.000 token/phút, mỗi lần gọi đã tốn 4.000–6.000.
-    const today = P.localNow(tz).date;
-    // Không trừ bản nháp: AI trả về cả bản nháp mới thay cho bản cũ
-    appState += `\nfree slots next 7 days (* = study block):\n${await freeSlotsText(db, user, today, P.addDays(today, 6), tz)}`;
-  }
-  let system = SYSTEM_PROMPT;
-  if (MODE_HINTS[mode]) system += `\n\n${MODE_HINTS[mode]}`;
-  if (INTENT_HINTS[intent]) system += `\n\nPurpose of this request: ${INTENT_HINTS[intent]}`;
-  const messages = [
-    { role: 'system', content: system },
-    ...past.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.message).slice(0, HISTORY_MSG_CHARS) })),
-    { role: 'user', content: `<app_state>\n${appState}\n</app_state>\n\n${userMessage.slice(0, 4000)}` }
-  ];
-
-  const ctx = { model: MODEL, startedAt: Date.now(), triedFallback: false, primaryBlockedUntil: 0, json: !!draft };
-  // Bản nháp: không dùng lệnh gọi công cụ (gpt-oss trên Groq hay viết hỏng JSON khi danh sách việc dài),
-  // mà xin thẳng một khối JSON rồi máy chủ tự kiểm tra, bỏ buổi trùng giờ. Một lần gọi Groq.
-  if (draft) {
-    try {
-      const data = await callGroqResilient(messages, ctx);
-      return await buildDraftFromJSON(db, user, data.choices?.[0]?.message?.content, draft, language);
-    } catch (err) {
-      console.error('[LifeCare AI] Groq draft call failed:', err.message);
-      return { reply: describeError(err, language), draftTasks: draft.tasks, type: 'error', retryable: err.status === 429 || err.status === 400 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
+  const requestStartedAt = Date.now();
+  // lite = bản gửi Gemini: không lịch sử chat (có thể chứa chuyện cảm xúc), không tên / sức khoẻ / tâm trạng
+  const buildMessages = async lite => {
+    let appState = await buildAppState(db, user, language, tz, { lite });
+    if (draft) {
+      appState += `\ndraft (id|date|time|title|category|priority|duration), not saved yet:\n${draft.tasks.map(draftLine).join('\n') || 'empty'}`;
+      // Gửi sẵn giờ trống 7 ngày tới để AI lập bản nháp trong MỘT lần gọi (gói miễn phí Groq ~8.000 token/phút).
+      // Không trừ bản nháp: AI trả về cả bản nháp mới thay cho bản cũ.
+      const today = P.localNow(tz).date;
+      appState += `\nfree slots next 7 days (* = study block):\n${await freeSlotsText(db, user, today, P.addDays(today, 6), tz)}`;
     }
-  }
-  try {
+    let system = SYSTEM_PROMPT;
+    if (MODE_HINTS[mode]) system += `\n\n${MODE_HINTS[mode]}`;
+    if (INTENT_HINTS[intent]) system += `\n\nPurpose of this request: ${INTENT_HINTS[intent]}`;
+    return [
+      { role: 'system', content: system },
+      ...(lite ? [] : past.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.message).slice(0, HISTORY_MSG_CHARS) }))),
+      { role: 'user', content: `<app_state>\n${appState}\n</app_state>\n\n${userMessage.slice(0, 4000)}` }
+    ];
+  };
+  const groqCtx = () => ({ provider: 'groq', model: MODEL, startedAt: Date.now(), requestStartedAt, triedFallback: false, primaryBlockedUntil: 0, json: !!draft });
+  const geminiCtx = () => ({ provider: 'gemini', startedAt: Date.now(), requestStartedAt, json: !!draft });
+  // Còn đủ thời gian và chưa đổi dữ liệu nào thì mới chuyển sang Gemini (chạy lại từ đầu, tránh thêm việc hai lần)
+  const canFallBack = () => hasGemini() && !Object.values(changes).some(Boolean) && REQUEST_BUDGET_MS - (Date.now() - requestStartedAt) > 8000;
+  const errorResult = err => ({
+    reply: describeError(err, language), draftTasks: draft ? draft.tasks : undefined, type: 'error',
+    retryable: err.status === 429 || err.status === 400 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes
+  });
+
+  // Bản nháp: không dùng lệnh gọi công cụ (gpt-oss trên Groq hay viết hỏng JSON khi danh sách việc dài),
+  // mà xin thẳng một khối JSON rồi máy chủ tự kiểm tra, bỏ buổi trùng giờ. Một lần gọi.
+  const runDraft = async (messages, ctx) => {
+    const data = await callGroqResilient(messages, ctx);
+    return { ...(await buildDraftFromJSON(db, user, data.choices?.[0]?.message?.content, draft, language)), provider: ctx.provider };
+  };
+
+  const runToolLoop = async (messages, ctx) => {
     let reply = '';
     for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
       const data = await callGroqResilient(messages, ctx);
@@ -559,16 +613,9 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
       const calls = msg.tool_calls || [];
       messages.push({ role: 'assistant', content: msg.content || '', ...(calls.length ? { tool_calls: calls } : {}) });
       if (calls.length === 0) break;
-      let toolError = false;
       for (const call of calls) {
-        const result = await runTool(db, user, call.function?.name, call.function?.arguments, changes, tz, draft);
-        if (/^Error/.test(result)) toolError = true;
+        const result = await runTool(db, user, call.function?.name, call.function?.arguments, changes, tz, null);
         messages.push({ role: 'tool', tool_call_id: call.id, content: result });
-      }
-      // Bản nháp đã lập xong, không lỗi: dừng luôn, khỏi tốn thêm một lần gọi chỉ để lấy câu trả lời
-      if (draft && changes.draft && !toolError && draft.tasks.length) {
-        reply = draftReadyText(draft.tasks.length, language);
-        break;
       }
     }
     if (!reply) {
@@ -578,21 +625,27 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
         ? (language === 'en' ? 'Done! I have updated your planner.' : 'Xong rồi! Mình đã cập nhật lịch của bạn.')
         : (language === 'en' ? "I couldn't do that this time. Could you say it another way?" : 'Lần này mình chưa làm được. Bạn nói lại cụ thể hơn giúp mình nhé.');
     }
-    return { reply, type: 'llm_response', tasksChanged: changes, draftTasks: draft ? draft.tasks : undefined };
-  } catch (err) {
-    console.error('[LifeCare AI] Groq call failed:', err.message);
-    // Bản nháp đã lập xong, chỉ lượt trả lời cuối bị giới hạn (thường là hết token/phút):
-    // vẫn đưa bản nháp cho người dùng xem và áp dụng, không báo lỗi.
-    if (draft && changes.draft && draft.tasks.length) {
-      return {
-        reply: draftReadyText(draft.tasks.length, language),
-        type: 'llm_response',
-        draftTasks: draft.tasks,
-        tasksChanged: changes
-      };
+    return { reply, type: 'llm_response', tasksChanged: changes, provider: ctx.provider };
+  };
+
+  const run = draft ? runDraft : runToolLoop;
+  let firstErr = null;
+  if (hasGroq()) {
+    try {
+      return await run(await buildMessages(false), groqCtx());
+    } catch (err) {
+      firstErr = err;
+      console.error('[LifeCare AI] Groq call failed:', err.message);
+      if (!canFallBack()) return errorResult(err);
     }
-    // Có thể đã đổi một phần dữ liệu trước khi lỗi: vẫn báo để giao diện tải lại.
-    return { reply: describeError(err, language), draftTasks: draft ? draft.tasks : undefined, type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
+  }
+  if (!hasGemini()) return errorResult(firstErr || new Error('No AI provider configured'));
+  try {
+    console.warn('[LifeCare AI] Chuyển sang Gemini (dữ liệu rút gọn)');
+    return await run(await buildMessages(true), geminiCtx());
+  } catch (err) {
+    console.error('[LifeCare AI] Gemini call failed:', err.message);
+    return errorResult(firstErr || err);
   }
 }
 
@@ -601,7 +654,12 @@ async function buildDraftFromJSON(db, user, content, oldDraft, language) {
   const en = language === 'en';
   const changes = { added: 0, updated: 0, deleted: 0, goals: 0, progress: 0, disruptions: 0, draft: true };
   let parsed = null;
-  try { parsed = JSON.parse(String(content || '').replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { parsed = null; }
+  const text = String(content || '').trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  try { parsed = JSON.parse(text); } catch { parsed = null; }
+  // Không có chế độ JSON (Gemini): model có thể viết thêm chữ quanh khối JSON, lấy từ "{" đầu tới "}" cuối
+  if (!parsed && text.includes('{')) {
+    try { parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)); } catch { parsed = null; }
+  }
   if (!parsed || typeof parsed !== 'object') {
     console.error('[LifeCare AI] draft JSON unreadable:', String(content || '').slice(0, 300));
     return { reply: en ? 'I could not build the draft this time. Please press Retry.' : 'Lần này mình chưa lập được bản nháp. Bấm "Thử lại" giúp mình nhé.', type: 'error', retryable: true, draftTasks: oldDraft.tasks, tasksChanged: null };
@@ -656,6 +714,6 @@ function cleanDraft(list) {
   return draft;
 }
 
-const isLLMConfigured = () => Boolean(process.env.GROQ_API_KEY);
+const isLLMConfigured = () => hasGroq() || hasGemini();
 
 module.exports = { generateLLMReply, isLLMConfigured, cleanTaskFields, INTENT_HINTS };

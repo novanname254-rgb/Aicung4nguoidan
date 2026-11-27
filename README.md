@@ -128,6 +128,8 @@ Trợ lý AI chạy bằng mô hình ngôn ngữ thật qua Groq (`server/llm-as
 
 Muốn dùng nhiều hơn thì nâng Groq lên Dev Tier (trả phí).
 
+**Dự phòng Gemini:** đặt `GEMINI_API_KEY` (lấy tại https://aistudio.google.com/apikey) thì khi Groq lỗi hoặc hết lượt, server chuyển ngay sang Gemini (`GEMINI_MODEL`, mặc định `gemini-3.5-flash-lite`) thay vì bắt người dùng bấm "Thử lại". Gói miễn phí của Gemini cho phép Google dùng dữ liệu gửi lên để cải thiện sản phẩm, nên lúc chuyển sang Gemini app chỉ gửi lịch, khung giờ, mục tiêu, giờ giấc và câu hỏi hiện tại; không gửi tên, tâm lý nền, sức khoẻ, tâm trạng hay lịch sử chat. Nếu AI đã sửa dữ liệu trước khi Groq lỗi thì không chuyển (tránh thêm việc hai lần).
+
 Biến môi trường: `GROQ_API_KEY` (bắt buộc để bật AI), `GROQ_MODEL` (mặc định `openai/gpt-oss-120b`), `APP_TIMEZONE` (mặc định `Asia/Ho_Chi_Minh`). Không có `GROQ_API_KEY` thì trợ lý dùng bộ luật trả lời cố định như trước.
 
 ### Prerequisites
