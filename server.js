@@ -1176,6 +1176,7 @@ async function routeRequest(req, res) {
           draftTasks: aiResult.draftTasks || null,
           historySince,
           llm: isLLMConfigured(),
+          provider: aiResult.provider || null, // groq | gemini (gemini = Groq lỗi, đã chuyển sang dự phòng)
           retryable: Boolean(aiResult.retryable)
         });
       }
