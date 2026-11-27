@@ -38,6 +38,7 @@ const INTENT_HINTS = {
   disruption: `The user just declared a disruption (already saved). Re-plan the affected pending tasks by priority, deadline and time left: find free slots before each deadline, keep urgent/high-priority work, shorten or split long tasks, push or drop low-priority ones. Do NOT just move everything to tomorrow or overload one day. Explain briefly what moved and why.`,
   goal_breakdown: `Break the goal into concrete tasks (create_goal first if it doesn't exist) with duration_minutes, priority and deadline, in a sensible order, placed with find_free_slots before the goal deadline (prefer study slots and the best focus time, respect max focus minutes). If it doesn't fit, say so and propose options.`,
   allocate_free_time: `Allocate the user's free time in the given range (default rest of this week) with find_free_slots: fill a reasonable share, not all, with work toward active goals and habits, respecting energy, focus time and breaks.`,
+  create_schedule: `The user is building a new schedule in the "Create" screen. Their answers (goal, deadline, daily time, intake form with sleep/wake and school/work hours) are in the message and <app_state>. FIRST check the goal is realistic (see Realism); if it is not, do not plan yet: explain in one or two sentences and offer a realistic target. Otherwise build a DRAFT for the requested period (default: the next 7 days): call find_free_slots, then add_tasks. In this mode add_tasks/update_task/delete_task only change the draft shown to the user (ids "draft_N"), nothing is saved until the user presses "Áp dụng". Include short breaks between long sessions. Then reply in 2-4 short lines: what the draft covers, and tell the user to check it and press "Áp dụng vào thời gian biểu" when it looks right, or tell you what to change.`,
   behind_schedule: `The user is behind. Using overdue/pending tasks and goal forecasts, adjust only what's needed (no full rebuild): re-slot missed tasks by priority and deadline, shrink or drop low-value items, and say honestly whether the deadline is still realistic.`
 };
 
@@ -46,6 +47,12 @@ const SYSTEM_PROMPT = `You are the AI assistant in LifeCare, an app for planning
 Context: each request starts with a compact <app_state> (hidden from the user): today, profile, fixed psychological baseline (psych), weekly time blocks (repeat every week), tasks for -2..+7 days as "id|date|time|title|category|priority|status|duration|deadline|goal", goals with progress/forecast/feasibility, disruptions, recent health and mood.
 
 Tools: list_tasks, find_free_slots ("study" = free time inside study blocks), add_tasks, update_task, delete_task, create_goal, update_goal, log_progress, add_disruption. Change data only when the user asks or clearly agrees (or the stated purpose implies it); ask if unclear. Never invent ids. Dates YYYY-MM-DD, times HH:MM 24h; categories Study, Work, Exercise, Personal, Rest, Other; priority low/medium/high.
+
+Intake: <app_state> has an "intake" line with the user's saved sleep/wake time, school/work hours and days, best focus time, max focus minutes and daily minutes for goals. Use it; never ask the user to type these in the chat. If something is missing, say the app will show a short form and keep your question to one line.
+
+Realism: before planning a goal, check it is possible and realistic. Examples: IELTS bands go 0-9.0 (no 10.0), TOEIC max 990, SAT max 1600; safe weight loss is about 0.5-1 kg per week; a beginner cannot become fluent in a month. If a goal is impossible or unrealistic for the deadline, say so plainly and propose a realistic target (e.g. "IELTS 9.0 is the maximum; from your level 6.5-7.0 in 3 months is realistic") before creating any task or goal.
+
+Acting on requests: when the user asks to add, move, shorten, delete or change tasks, do it with the tools in this turn (list_tasks first if you need ids), then confirm in one line. Don't just describe what you would do.
 
 Planning rules: never place tasks over time blocks (study work may go in study blocks), other tasks or disruptions; get free time from find_free_slots. Put hard work at the user's best focus time, keep sessions within their max focus minutes, add breaks, protect sleep. Lighten the load after poor sleep, high stress or low mood and say why. Be honest when something won't fit before its deadline and offer options. After changes, say briefly what changed and why; don't repeat the whole schedule. Base insights on the real numbers.
 
@@ -162,7 +169,7 @@ const taskLine = t => [t.id, t.date, t.start_time ? `${t.start_time}-${t.end_tim
   t.status === 'completed' ? 'done' : 'todo', t.duration_minutes ? `${t.duration_minutes}m` : '', t.deadline || '', t.goal_id || ''].join('|').replace(/\|+$/, '');
 
 // ---------------------------------------------------------------- thực thi tool
-async function runTool(db, user, name, argsText, changes, tz) {
+async function runTool(db, user, name, argsText, changes, tz, draft = null) {
   let args;
   try {
     args = JSON.parse(argsText || '{}');
@@ -183,7 +190,11 @@ async function runTool(db, user, name, argsText, changes, tz) {
   if (name === 'find_free_slots') {
     if (!P.isRealDate(args.start_date) || !P.isRealDate(args.end_date)) return 'Error: start_date and end_date must be YYYY-MM-DD.';
     if (P.daysBetween(args.start_date, args.end_date) > 62) return 'Error: range must be at most 62 days.';
-    const slots = await P.findFreeSlots(db, userId, args.start_date, args.end_date, { minMinutes: positiveInt(args.min_minutes, 600) || 30, tz });
+    const slots = await P.findFreeSlots(db, userId, args.start_date, args.end_date, {
+      minMinutes: positiveInt(args.min_minutes, 600) || 30, tz,
+      extraTasks: draft ? draft.tasks : [],
+      fallbackBlocks: P.intakeBlocks(P.readIntake(user))
+    });
     // Gọn để tiết kiệm token: "ngày start-end phút loại"
     const lines = slots.slice(0, 60).map(f => `${f.date} ${f.start}-${f.end} ${f.minutes}m${f.kind === 'study_block' ? ' study' : ''}`);
     return lines.length ? lines.join('\n') + (slots.length > 60 ? `\n(+${slots.length - 60} more; narrow the range)` : '') : 'No free slots.';
@@ -202,7 +213,23 @@ async function runTool(db, user, name, argsText, changes, tz) {
       if (task.goal_id && !(await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?').get(task.goal_id, userId))) {
         return `Error in tasks[${i}]: unknown goal_id ${task.goal_id}. Nothing was saved.`;
       }
+      // Không đè lên việc đã có, việc vừa thêm trong cùng lần gọi, bản nháp, hay khung giờ cố định
+      if (task.start_time && task.end_time) {
+        const conflict = await P.findConflict(db, userId, {
+          date: task.date, start_time: task.start_time, end_time: task.end_time, checkBlocks: true,
+          extraTasks: [...(draft ? draft.tasks : []), ...cleaned],
+          fallbackBlocks: P.intakeBlocks(P.readIntake(user))
+        });
+        if (conflict) {
+          return `Error in tasks[${i}] "${task.title}" ${task.date} ${task.start_time}-${task.end_time}: overlaps ${conflict.kind} "${conflict.title}" ${conflict.start}-${conflict.end}. Tasks must never overlap. Nothing was saved; use find_free_slots and call again.`;
+        }
+      }
       cleaned.push(task);
+    }
+    if (draft) {
+      for (const t of cleaned) draft.tasks.push({ ...t, id: `draft_${++draft.seq}` });
+      changes.draft = true;
+      return `Draft now has ${draft.tasks.length} tasks (not saved until the user presses Apply): ` + cleaned.map(t => `${t.date} ${t.start_time || ''} ${t.title}`).join('; ');
     }
     const created = [];
     for (const t of cleaned) {
@@ -218,6 +245,33 @@ async function runTool(db, user, name, argsText, changes, tz) {
     return `Added ${created.length}: ` + created.map(c => `${c.id} ${c.date} ${c.start_time || ''} ${c.title}`).join('; ');
   }
 
+  if (draft && typeof args.id === 'string' && args.id.startsWith('draft_')) {
+    const idx = draft.tasks.findIndex(t => t.id === args.id);
+    if (idx < 0) return `Error: no draft task ${args.id}.`;
+    if (name === 'delete_task') {
+      draft.tasks.splice(idx, 1);
+      changes.draft = true;
+      return 'Removed from draft.';
+    }
+    if (name === 'update_task') {
+      const { id, ...rest } = args;
+      const [fields, problem] = cleanTaskFields(rest, true);
+      if (problem) return `Error: ${problem}`;
+      const merged = { ...draft.tasks[idx], ...fields };
+      if (merged.start_time && merged.end_time) {
+        if (merged.end_time <= merged.start_time) return 'Error: end_time must be after start_time.';
+        const conflict = await P.findConflict(db, userId, {
+          date: merged.date, start_time: merged.start_time, end_time: merged.end_time, checkBlocks: true,
+          extraTasks: draft.tasks.filter(t => t.id !== id), fallbackBlocks: P.intakeBlocks(P.readIntake(user))
+        });
+        if (conflict) return `Error: overlaps ${conflict.kind} "${conflict.title}" ${conflict.start}-${conflict.end}. Pick a free slot.`;
+      }
+      draft.tasks[idx] = merged;
+      changes.draft = true;
+      return `Draft updated: ${draftLine(merged)}`;
+    }
+  }
+
   if (name === 'update_task') {
     if (typeof args.id !== 'string') return 'Error: id is required.';
     const existing = await db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(args.id, userId);
@@ -227,6 +281,10 @@ async function runTool(db, user, name, argsText, changes, tz) {
     if (problem) return `Error: ${problem}`;
     const merged = { ...existing, ...fields };
     if (merged.start_time && merged.end_time && merged.end_time <= merged.start_time) return 'Error: end_time must be after start_time.';
+    if (merged.start_time && merged.end_time && ('date' in fields || 'start_time' in fields || 'end_time' in fields)) {
+      const conflict = await P.findConflict(db, userId, { date: merged.date, start_time: merged.start_time, end_time: merged.end_time, excludeId: id, checkBlocks: true });
+      if (conflict) return `Error: ${merged.date} ${merged.start_time}-${merged.end_time} overlaps ${conflict.kind} "${conflict.title}" ${conflict.start}-${conflict.end}. Tasks must never overlap; use find_free_slots.`;
+    }
     const keys = Object.keys(fields);
     if (keys.length === 0) return 'Error: no fields to change.';
     await db.prepare(`UPDATE tasks SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ? AND user_id = ?`)
@@ -328,6 +386,14 @@ function parseJSON(text) {
   }
 }
 
+function intakeLine(user) {
+  const i = P.readIntake(user);
+  if (!i) return 'intake: not filled';
+  return `intake: role=${i.role || '-'} wake=${i.wake || '-'} sleep=${i.sleep || '-'} busy=${i.busy_start && i.busy_end ? `${i.busy_start}-${i.busy_end} ${(i.busy_days || []).join(',')}` : 'none'} focus=${i.focus_time || '-'} max_focus=${i.focus_minutes || '-'}m daily_for_goals=${i.daily_minutes || '-'}m`;
+}
+
+const draftLine = d => [d.id, d.date, d.start_time ? `${d.start_time}-${d.end_time || ''}` : 'allday', d.title, d.category, d.priority, d.duration_minutes ? `${d.duration_minutes}m` : ''].join('|');
+
 async function buildAppState(db, user, language, tz) {
   const now = P.localNow(tz);
   const tasks = await db.prepare('SELECT * FROM tasks WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, start_time ASC LIMIT 80')
@@ -344,6 +410,7 @@ async function buildAppState(db, user, language, tz) {
   const psych = parseJSON(user.psych_profile);
   return [
     `today: ${now.date} (${now.weekday}) ${now.time} ${now.timezone}; reply language: ${language}`,
+    intakeLine(user),
     `profile: ${user.full_name}${user.personal_goals ? '; goals: ' + String(user.personal_goals).slice(0, 200) : ''}`,
     psych ? `psych: ${Object.entries(psych).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${v}`).join(', ')}` : 'psych: not set',
     `blocks:\n${blocks.map(b => `${b.block_type}${b.label ? ` "${b.label}"` : ''} ${b.start_time}-${b.end_time} ${daysText(b.days)}`).join('\n') || 'none'}`,
@@ -423,8 +490,10 @@ function describeError(err, language) {
  * Trả lời một tin nhắn. Tin nhắn của người dùng phải đã được lưu vào ai_chats trước khi gọi.
  * @returns {{ reply: string, type: string, tasksChanged: object }}
  */
-async function generateLLMReply(db, user, userMessage, { mode = 'general', language = 'vi', intent = null, tz } = {}) {
+async function generateLLMReply(db, user, userMessage, { mode = 'general', language = 'vi', intent = null, tz, draftTasks = null } = {}) {
   const changes = { added: 0, updated: 0, deleted: 0, goals: 0, progress: 0, disruptions: 0 };
+  // Màn hình "Tạo lịch trình": AI chỉ sửa bản nháp, người dùng bấm "Áp dụng" mới lưu.
+  const draft = intent === 'create_schedule' ? cleanDraft(draftTasks) : null;
 
   const past = await db.prepare('SELECT role, message FROM ai_chats WHERE user_id = ? ORDER BY created_at DESC LIMIT ?')
     .all(user.id, HISTORY_LIMIT + 1);
@@ -432,7 +501,8 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
   past.pop(); // bỏ tin nhắn hiện tại (đã lưu), sẽ thêm lại kèm app_state
   while (past.length && past[0].role !== 'user') past.shift();
 
-  const appState = await buildAppState(db, user, language, tz);
+  let appState = await buildAppState(db, user, language, tz);
+  if (draft) appState += `\ndraft (id|date|time|title|category|priority|duration), not saved yet:\n${draft.tasks.map(draftLine).join('\n') || 'empty'}`;
   let system = SYSTEM_PROMPT;
   if (MODE_HINTS[mode]) system += `\n\n${MODE_HINTS[mode]}`;
   if (INTENT_HINTS[intent]) system += `\n\nPurpose of this request: ${INTENT_HINTS[intent]}`;
@@ -453,19 +523,29 @@ async function generateLLMReply(db, user, userMessage, { mode = 'general', langu
       messages.push({ role: 'assistant', content: msg.content || '', ...(calls.length ? { tool_calls: calls } : {}) });
       if (calls.length === 0) break;
       for (const call of calls) {
-        const result = await runTool(db, user, call.function?.name, call.function?.arguments, changes, tz);
+        const result = await runTool(db, user, call.function?.name, call.function?.arguments, changes, tz, draft);
         messages.push({ role: 'tool', tool_call_id: call.id, content: result });
       }
     }
     if (!reply) {
       reply = language === 'en' ? 'Done! I have updated your planner.' : 'Xong rồi! Mình đã cập nhật lịch của bạn.';
     }
-    return { reply, type: 'llm_response', tasksChanged: changes };
+    return { reply, type: 'llm_response', tasksChanged: changes, draftTasks: draft ? draft.tasks : undefined };
   } catch (err) {
     console.error('[LifeCare AI] Groq call failed:', err.message);
     // Có thể đã đổi một phần dữ liệu trước khi lỗi: vẫn báo để giao diện tải lại.
-    return { reply: describeError(err, language), type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
+    return { reply: describeError(err, language), draftTasks: draft ? draft.tasks : undefined, type: 'error', retryable: err.status === 429 || err.name === 'TimeoutError' || err.status >= 500, tasksChanged: changes };
   }
+}
+
+/** Bản nháp người dùng gửi lại (đang xem trên màn hình): chỉ giữ việc hợp lệ, đánh lại id draft_N. */
+function cleanDraft(list) {
+  const draft = { tasks: [], seq: 0 };
+  for (const raw of Array.isArray(list) ? list.slice(0, 120) : []) {
+    const [t] = cleanTaskFields(raw, false);
+    if (t) draft.tasks.push({ ...t, id: `draft_${++draft.seq}` });
+  }
+  return draft;
 }
 
 const isLLMConfigured = () => Boolean(process.env.GROQ_API_KEY);

@@ -75,7 +75,7 @@ function applyLanguage(lang) {
   // Re-render dynamic active views
   if (AppState.activeView === 'dashboard') loadDashboard();
   else if (AppState.activeView === 'planner') loadPlanner();
-  else if (AppState.activeView === 'routine') loadRoutine();
+  else if (AppState.activeView === 'routine') loadRoutine({ silent: true });
   else if (AppState.activeView === 'goals') loadGoals();
   else if (AppState.activeView === 'physical') loadPhysicalHealth();
   else if (AppState.activeView === 'mental') loadMentalHealth();
@@ -1548,7 +1548,7 @@ function refreshActiveView() {
   const v = AppState.activeView;
   if (v === 'dashboard') loadDashboard();
   else if (v === 'planner') loadPlanner();
-  else if (v === 'routine') loadRoutine();
+  else if (v === 'routine') loadRoutine({ silent: true });
   else if (v === 'goals') loadGoals();
 }
 

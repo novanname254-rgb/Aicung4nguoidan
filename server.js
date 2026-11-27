@@ -8,7 +8,7 @@ const { getDb, initDatabase, hashPassword, verifyPassword } = require('./server/
 const P = require('./server/planning');
 const { ensureDemoUser, createGuestUser, isGuestId, createSession, getUserFromSession, deleteSession } = require('./server/auth');
 const { checkCrisisOrEmergency, generateAIWellnessReply, analyzeScheduleBalance, buildWeeklyReportData } = require('./server/ai-engine');
-const { generateLLMReply, isLLMConfigured } = require('./server/llm-assistant');
+const { generateLLMReply, isLLMConfigured, cleanTaskFields } = require('./server/llm-assistant');
 const { isMailConfigured, sendMail, tempPasswordEmail } = require('./server/mailer');
 
 const PORT = process.env.PORT || 3000;
@@ -430,7 +430,9 @@ async function routeRequest(req, res) {
         if (body.psych_profile && typeof body.psych_profile === 'object') {
           const pp = body.psych_profile;
           const lvl = v => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null; };
+          const keepIntake = P.readIntake(user); // phiếu thông tin lập lịch lưu chung chỗ, không để mất khi sửa tâm lý nền
           psych = JSON.stringify({
+            ...(keepIntake ? { intake: keepIntake } : {}),
             willpower: lvl(pp.willpower),
             stress_tolerance: lvl(pp.stress_tolerance),
             motivation_source: String(pp.motivation_source || '').slice(0, 100) || null,
@@ -666,17 +668,15 @@ async function routeRequest(req, res) {
         const deadline = P.isRealDate(body.deadline) ? body.deadline : null;
         const goal_id = body.goal_id && (await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?').get(body.goal_id, user.id)) ? body.goal_id : null;
 
-        // Detect overlapping schedule with existing tasks on same date
-        let overlapWarning = null;
+        // Không cho công việc mới đè lên công việc đã có cùng ngày.
         if (start_time && end_time) {
-          const sameDayTasks = await db.prepare('SELECT id, title, start_time, end_time FROM tasks WHERE user_id = ? AND date = ? AND start_time IS NOT NULL AND end_time IS NOT NULL').all(user.id, date);
-          for (const t of sameDayTasks) {
-            if (start_time < t.end_time && end_time > t.start_time) {
-              overlapWarning = `Schedule overlap detected with "${t.title}" (${t.start_time} - ${t.end_time})`;
-              break;
-            }
+          if (!P.isTime(start_time) || !P.isTime(end_time) || end_time <= start_time) {
+            return sendJSON(res, 400, { success: false, message: 'Giờ kết thúc phải sau giờ bắt đầu (HH:MM).' });
           }
+          const conflict = await P.findConflict(db, user.id, { date, start_time, end_time });
+          if (conflict) return sendJSON(res, 409, { success: false, message: P.conflictMessage(conflict, body.language), conflict });
         }
+        const overlapWarning = null;
 
         const taskId = 'task_' + crypto.randomUUID();
         const now = new Date().toISOString();
@@ -723,6 +723,21 @@ async function routeRequest(req, res) {
         }
         const duration_minutes = intOrNull(body.duration_minutes, 1, 1440);
         if (Number.isNaN(duration_minutes)) return sendJSON(res, 400, { success: false, message: 'Thời lượng phải từ 1 đến 1440 phút.' });
+        // Không cho đổi ngày/giờ đè lên công việc khác.
+        // Chỉ kiểm tra khi ngày/giờ thật sự đổi (sửa tên một việc cũ đang trùng giờ vẫn được).
+        const timeChanged = ['date', 'start_time', 'end_time'].some(k => body[k] !== undefined && body[k] !== '' && body[k] !== existing[k]);
+        if (timeChanged) {
+          const nd = body.date || existing.date;
+          const ns = body.start_time || existing.start_time;
+          const ne = body.end_time || existing.end_time;
+          if (ns && ne) {
+            if (!P.isTime(ns) || !P.isTime(ne) || ne <= ns) {
+              return sendJSON(res, 400, { success: false, message: 'Giờ kết thúc phải sau giờ bắt đầu (HH:MM).' });
+            }
+            const conflict = await P.findConflict(db, user.id, { date: nd, start_time: ns, end_time: ne, excludeId: taskId });
+            if (conflict) return sendJSON(res, 409, { success: false, message: P.conflictMessage(conflict, body.language), conflict });
+          }
+        }
         // goal_id: "" = bỏ liên kết, undefined = giữ nguyên
         let goalId = existing.goal_id;
         if (body.goal_id !== undefined) {
@@ -1107,9 +1122,27 @@ async function routeRequest(req, res) {
         let aiResult = checkCrisisOrEmergency(userMessage.toLowerCase());
         if (aiResult && !aiResult.isCrisis && isLLMConfigured()) aiResult = null; // câu hỏi y tế: để LLM trả lời có giới hạn
 
+        // Màn hình "Tạo lịch trình" khi chưa cấu hình AI: kiểm tra mục tiêu rồi lập bản nháp đơn giản.
+        if (!aiResult && intent === 'create_schedule' && !isLLMConfigured()) {
+          const plan = body.plan && typeof body.plan === 'object' ? body.plan : {};
+          const problem = P.unrealisticGoal(plan.goal || userMessage);
+          if (problem) {
+            aiResult = { reply: problem, type: 'local', draftTasks: Array.isArray(body.draft) ? body.draft : [] };
+          } else {
+            const draftTasks = await P.simpleDraft(db, user, plan, tz);
+            aiResult = {
+              reply: draftTasks.length
+                ? `Mình đã xếp ${draftTasks.length} buổi cho "${plan.goal || 'mục tiêu'}" vào giờ còn trống, không trùng lịch có sẵn. Xem bên phải, thấy ổn thì bấm "Áp dụng vào thời gian biểu".`
+                : 'Không còn khoảng trống đủ dài trong những ngày này. Hãy giảm thời gian mỗi ngày hoặc kéo dài thời hạn.',
+              type: 'local',
+              draftTasks
+            };
+          }
+        }
+
         if (!aiResult && isLLMConfigured()) {
           // Trợ lý LLM (Groq): đọc dữ liệu của người dùng và tự thêm / sửa / xoá việc trong lịch.
-          aiResult = await generateLLMReply(db, user, userMessage, { mode, language, intent, tz });
+          aiResult = await generateLLMReply(db, user, userMessage, { mode, language, intent, tz, draftTasks: Array.isArray(body.draft) ? body.draft : null });
         } else if (!aiResult) {
           // Chưa cấu hình GROQ_API_KEY: dùng bộ luật cũ.
           const recentHealth = await db.prepare('SELECT * FROM health_checkins WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 7').all(user.id);
@@ -1135,6 +1168,8 @@ async function routeRequest(req, res) {
           type: aiResult.type,
           suggestedTasks: aiResult.suggestedTasks || [],
           tasksChanged: aiResult.tasksChanged || null,
+          draftTasks: aiResult.draftTasks || null,
+          llm: isLLMConfigured(),
           retryable: Boolean(aiResult.retryable)
         });
       }
@@ -1390,6 +1425,70 @@ async function routeRequest(req, res) {
       // ----------------------------------------
       // 10. THỜI GIAN BIỂU CỐ ĐỊNH (TIME BLOCKS) – thiết lập một lần, tự lặp theo tuần
       // ----------------------------------------
+      // GET/PUT /api/user/intake – phiếu thông tin lập lịch (giờ ngủ, giờ học/làm, giờ tập trung...), hỏi một lần rồi lưu lại
+      if (pathname === '/api/user/intake') {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        if (method === 'GET') return sendJSON(res, 200, { success: true, intake: P.readIntake(user) });
+        if (method === 'PUT') {
+          const body = await parseBody(req);
+          const intake = P.cleanIntake(body.intake || body);
+          if (!intake) return sendJSON(res, 400, { success: false, message: 'Thiếu thông tin.' });
+          let pp = {};
+          try { pp = JSON.parse(user.psych_profile || '{}') || {}; } catch (e) { pp = {}; }
+          pp.intake = intake;
+          // Đồng bộ sang tâm lý nền để AI và trang Cài đặt cùng dùng
+          if (intake.focus_time) pp.best_focus_time = intake.focus_time;
+          if (intake.focus_minutes) pp.max_focus_minutes = intake.focus_minutes;
+          const now = new Date().toISOString();
+          await db.prepare('UPDATE users SET psych_profile = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(pp), now, user.id);
+          const updated = await db.prepare('SELECT id, email, full_name, avatar, dob, gender, personal_goals, psych_profile, created_at, updated_at FROM users WHERE id = ?').get(user.id);
+          return sendJSON(res, 200, { success: true, intake, user: updated });
+        }
+      }
+
+      // POST /api/plan/apply – áp dụng lịch trình AI đề xuất (bản nháp) vào thời gian biểu.
+      // Việc nào trùng giờ với việc đã có hoặc khung giờ cố định thì bỏ qua và báo lại.
+      if (pathname === '/api/plan/apply' && method === 'POST') {
+        const user = await getAuthUser(req);
+        if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
+        const body = await parseBody(req);
+        const list = Array.isArray(body.tasks) ? body.tasks.slice(0, 120) : [];
+        if (!list.length) return sendJSON(res, 400, { success: false, message: 'Không có công việc nào để áp dụng.' });
+        const now = new Date().toISOString();
+
+        // Chưa có thời gian biểu: tạo khung giờ ngủ / đi học / ăn uống từ phiếu thông tin
+        let blocksCreated = 0;
+        const hasBlocks = await db.prepare('SELECT id FROM routine_blocks WHERE user_id = ? LIMIT 1').get(user.id);
+        if (!hasBlocks && body.create_blocks !== false) {
+          for (const b of P.intakeBlocks(P.readIntake(user))) {
+            await db.prepare(`INSERT INTO routine_blocks (id, user_id, block_type, label, start_time, end_time, days, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run('blk_' + crypto.randomUUID(), user.id, b.block_type, b.label, b.start_time, b.end_time, b.days, now, now);
+            blocksCreated++;
+          }
+        }
+
+        let added = 0;
+        const skipped = [];
+        for (const raw of list) {
+          const [t, problem] = cleanTaskFields(raw, false);
+          if (problem) { skipped.push({ title: raw && raw.title, reason: problem }); continue; }
+          if (t.start_time && t.end_time) {
+            if (t.end_time <= t.start_time) { skipped.push({ title: t.title, reason: 'Giờ kết thúc phải sau giờ bắt đầu.' }); continue; }
+            const conflict = await P.findConflict(db, user.id, { date: t.date, start_time: t.start_time, end_time: t.end_time, checkBlocks: true });
+            if (conflict) { skipped.push({ title: t.title, reason: P.conflictMessage(conflict) }); continue; }
+          }
+          const goalId = t.goal_id && (await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?').get(t.goal_id, user.id)) ? t.goal_id : null;
+          await db.prepare(`
+            INSERT INTO tasks (id, user_id, title, description, category, priority, date, start_time, end_time, status, is_event, reminder_time, recurring, goal_id, duration_minutes, deadline, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, NULL, 'none', ?, ?, ?, ?, ?)
+          `).run('task_' + crypto.randomUUID(), user.id, t.title, t.description || '', t.category, t.priority, t.date, t.start_time || null, t.end_time || null,
+            goalId, t.duration_minutes || null, t.deadline || null, now, now);
+          added++;
+        }
+        return sendJSON(res, 200, { success: true, added, skipped, blocksCreated });
+      }
+
       if (pathname === '/api/routine' || pathname.startsWith('/api/routine/')) {
         const user = await getAuthUser(req);
         if (!user) return sendJSON(res, 401, { success: false, message: 'Unauthorized.' });
@@ -1426,6 +1525,9 @@ async function routeRequest(req, res) {
           const body = await parseBody(req);
           const [b, problem] = validateBlock(body, false);
           if (problem) return sendJSON(res, 400, { success: false, message: problem });
+          const existingBlocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(user.id);
+          const clash = P.findBlockConflict(existingBlocks, b);
+          if (clash) return sendJSON(res, 409, { success: false, message: `Khung giờ này trùng với "${clash.title}" (${clash.start}–${clash.end}). Hãy chọn giờ còn trống.`, conflict: clash });
           const id = 'blk_' + crypto.randomUUID();
           await db.prepare(`INSERT INTO routine_blocks (id, user_id, block_type, label, start_time, end_time, days, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, user.id, b.block_type, b.label || P.BLOCK_LABELS[b.block_type], b.start_time, b.end_time, b.days, now, now);
@@ -1457,6 +1559,12 @@ async function routeRequest(req, res) {
           if (problem) return sendJSON(res, 400, { success: false, message: problem });
           const keys = Object.keys(b);
           if (!keys.length) return sendJSON(res, 400, { success: false, message: 'Không có gì để cập nhật.' });
+          const allBlocks = await db.prepare('SELECT * FROM routine_blocks WHERE user_id = ?').all(user.id);
+          const current = allBlocks.find(x => x.id === blockId);
+          if (current) {
+            const clash = P.findBlockConflict(allBlocks, { ...current, ...b }, blockId);
+            if (clash) return sendJSON(res, 409, { success: false, message: `Khung giờ này trùng với "${clash.title}" (${clash.start}–${clash.end}). Hãy chọn giờ còn trống.`, conflict: clash });
+          }
           const r = await db.prepare(`UPDATE routine_blocks SET ${keys.map(k => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ? AND user_id = ?`)
             .run(...keys.map(k => b[k]), now, blockId, user.id);
           if (!r.changes) return sendJSON(res, 404, { success: false, message: 'Không tìm thấy khung giờ.' });
